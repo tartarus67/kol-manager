@@ -1,0 +1,66 @@
+{
+  "query": "SELECT id, handle, postLanguage, enrichmentStatus, enrichedAt FROM kols WHERE enrichmentStatus = 'done' LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user s8wnVbZA4yzfrg7.8ebc791ac56d --database DZjTmaPHn9nCzaD9AuvmrW --execute SELECT id, handle, postLanguage, enrichmentStatus, enrichedAt FROM kols WHERE enrichmentStatus = 'done' LIMIT 10;",
+  "rows": [
+    {
+      "id": "52",
+      "handle": "edward__park",
+      "postLanguage": "ko",
+      "enrichmentStatus": "done",
+      "enrichedAt": "2026-03-16 09:47:06"
+    },
+    {
+      "id": "53",
+      "handle": "crypto1marine",
+      "postLanguage": "ko",
+      "enrichmentStatus": "done",
+      "enrichedAt": "2026-03-16 09:47:03"
+    },
+    {
+      "id": "54",
+      "handle": "jonnabutija",
+      "postLanguage": "ko",
+      "enrichmentStatus": "done",
+      "enrichedAt": "2026-03-16 09:47:03"
+    },
+    {
+      "id": "55",
+      "handle": "rq2ryd1edndy7wx",
+      "postLanguage": "ko",
+      "enrichmentStatus": "done",
+      "enrichedAt": "2026-03-16 09:47:03"
+    },
+    {
+      "id": "56",
+      "handle": "coinboy717",
+      "postLanguage": "ko",
+      "enrichmentStatus": "done",
+      "enrichedAt": "2026-03-16 09:47:06"
+    },
+    {
+      "id": "57",
+      "handle": "gogogonum",
+      "postLanguage": "ko",
+      "enrichmentStatus": "done",
+      "enrichedAt": "2026-03-16 09:47:02"
+    },
+    {
+      "id": "58",
+      "handle": "oldman_cek",
+      "postLanguage": "ko",
+      "enrichmentStatus": "done",
+      "enrichedAt": "2026-03-16 09:47:02"
+    },
+    {
+      "id": "60",
+      "handle": "baeko_02",
+      "postLanguage": "en",
+      "enrichmentStatus": "done",
+      "enrichedAt": "2026-03-16 09:47:00"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\thandle\tpostLanguage\tenrichmentStatus\tenrichedAt\n52\tedward__park\tko\tdone\t2026-03-16 09:47:06\n53\tcrypto1marine\tko\tdone\t2026-03-16 09:47:03\n54\tjonnabutija\tko\tdone\t2026-03-16 09:47:03\n55\trq2ryd1edndy7wx\tko\tdone\t2026-03-16 09:47:03\n56\tcoinboy717\tko\tdone\t2026-03-16 09:47:06\n57\tgogogonum\tko\tdone\t2026-03-16 09:47:02\n58\toldman_cek\tko\tdone\t2026-03-16 09:47:02\n60\tbaeko_02\ten\tdone\t2026-03-16 09:47:00\n",
+  "stderr": "",
+  "execution_time_ms": 54
+}

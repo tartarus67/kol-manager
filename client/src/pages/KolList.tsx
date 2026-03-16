@@ -16,7 +16,7 @@ import {
 import { trpc } from "@/lib/trpc";
 import {
   Search, Upload, Trash2, Eye, ChevronUp, ChevronDown, X,
-  FolderPlus, CheckSquare, Zap, UserPlus,
+  FolderPlus, CheckSquare, Zap, UserPlus, Pencil,
 } from "lucide-react";
 import { useState, useRef, useMemo } from "react";
 import { useLocation } from "wouter";
@@ -296,6 +296,33 @@ export default function KolList() {
 
   const [bulkFolderTarget, setBulkFolderTarget] = useState<number | null>(null);
 
+  // ─── Bulk Edit state ───────────────────────────────────────────────────────
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkEditRegion, setBulkEditRegion] = useState("");
+  const [bulkEditLanguage, setBulkEditLanguage] = useState("");
+  const [bulkEditCategory, setBulkEditCategory] = useState("");
+  const [bulkEditFolderId, setBulkEditFolderId] = useState<number | null>(null);
+
+  const bulkEditMutation = trpc.kol.bulkEdit.useMutation({
+    onSuccess: (data) => {
+      utils.kol.list.invalidate();
+      toast.success(`Updated ${data.updated} KOL${data.updated !== 1 ? "s" : ""}`);
+      setSelected(new Set());
+      setBulkEditOpen(false);
+      setBulkEditRegion(""); setBulkEditLanguage(""); setBulkEditCategory(""); setBulkEditFolderId(null);
+    },
+    onError: () => toast.error("Bulk edit failed"),
+  });
+
+  function handleBulkEdit() {
+    const payload: any = { ids: Array.from(selected) };
+    if (bulkEditRegion.trim()) payload.region = bulkEditRegion.trim();
+    if (bulkEditLanguage.trim()) payload.postLanguage = bulkEditLanguage.trim();
+    if (bulkEditCategory.trim()) payload.category = bulkEditCategory.trim();
+    if (bulkEditFolderId !== null) payload.folderId = bulkEditFolderId;
+    bulkEditMutation.mutate(payload);
+  }
+
   return (
     <DashboardLayout>
       <div className="space-y-4 p-2">
@@ -333,6 +360,11 @@ export default function KolList() {
           <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary/10 border border-primary/20 flex-wrap">
             <span className="text-sm font-medium text-primary">{selectedCount} selected</span>
             <div className="flex items-center gap-2 flex-wrap">
+              <Button size="sm" variant="outline" onClick={() => setBulkEditOpen(true)}
+                className="border-primary/40 text-primary hover:bg-primary/10 h-7 text-xs gap-1">
+                <Pencil className="h-3.5 w-3.5" />
+                Edit
+              </Button>
               <Button size="sm" variant="outline" onClick={() => setBulkStatusOpen(true)}
                 className="border-border text-foreground hover:bg-secondary h-7 text-xs gap-1">
                 <CheckSquare className="h-3.5 w-3.5" />
@@ -428,6 +460,7 @@ export default function KolList() {
                     { label: "KOL", field: "displayName" as SortField },
                     { label: "Platform", field: null },
                     { label: "Region", field: "region" as SortField },
+                    { label: "Language", field: null },
                     { label: "Category", field: "category" as SortField },
                     { label: "Followers", field: "followers" as SortField },
                     { label: "Eng. Rate", field: "engagementRate" as SortField },
@@ -495,6 +528,7 @@ export default function KolList() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground cursor-pointer" onClick={() => setLocation(`/kols/${kol.id}`)}>{kol.platform}</td>
                       <td className="px-4 py-3 text-muted-foreground cursor-pointer" onClick={() => setLocation(`/kols/${kol.id}`)}>{kol.region || "—"}</td>
+                      <td className="px-4 py-3 text-muted-foreground cursor-pointer text-xs" onClick={() => setLocation(`/kols/${kol.id}`)}>{(kol as any).postLanguage || "—"}</td>
                       <td className="px-4 py-3 cursor-pointer" onClick={() => setLocation(`/kols/${kol.id}`)}>
                         {kol.category ? (
                           <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-foreground border border-border">
@@ -794,7 +828,67 @@ export default function KolList() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ── Bulk Delete ──────────────────────────────────────────────────────── */}
+      {/* ── Bulk Edit ───────────────────────────────────────────────────────────────────────────── */}
+      <Dialog open={bulkEditOpen} onOpenChange={setBulkEditOpen}>
+        <DialogContent className="bg-card border-border text-foreground max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit {selectedCount} KOL{selectedCount !== 1 ? "s" : ""}</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground -mt-2">Only filled fields will be updated. Leave blank to keep existing values.</p>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Region</label>
+              <Input
+                placeholder="e.g. Korea, India, Turkey..."
+                value={bulkEditRegion}
+                onChange={e => setBulkEditRegion(e.target.value)}
+                className="bg-secondary border-border text-foreground text-sm h-8"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Post Language</label>
+              <Input
+                placeholder="e.g. Korean, English, Turkish..."
+                value={bulkEditLanguage}
+                onChange={e => setBulkEditLanguage(e.target.value)}
+                className="bg-secondary border-border text-foreground text-sm h-8"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Category</label>
+              <Input
+                placeholder="e.g. Crypto, Gaming, DeFi..."
+                value={bulkEditCategory}
+                onChange={e => setBulkEditCategory(e.target.value)}
+                className="bg-secondary border-border text-foreground text-sm h-8"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Add to Folder (optional)</label>
+              <Select value={bulkEditFolderId?.toString() ?? "none"} onValueChange={v => setBulkEditFolderId(v === "none" ? null : parseInt(v))}>
+                <SelectTrigger className="bg-secondary border-border text-foreground h-8 text-sm">
+                  <SelectValue placeholder="No folder change" />
+                </SelectTrigger>
+                <SelectContent className="bg-popover border-border">
+                  <SelectItem value="none">No folder change</SelectItem>
+                  {folderList.map(f => <SelectItem key={f.id} value={f.id.toString()}>{f.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkEditOpen(false)} className="border-border text-foreground hover:bg-secondary">Cancel</Button>
+            <Button
+              onClick={handleBulkEdit}
+              disabled={bulkEditMutation.isPending || (!bulkEditRegion.trim() && !bulkEditLanguage.trim() && !bulkEditCategory.trim() && bulkEditFolderId === null)}
+              className="bg-primary text-primary-foreground hover:bg-primary/90">
+              {bulkEditMutation.isPending ? "Saving..." : `Update ${selectedCount} KOL${selectedCount !== 1 ? "s" : ""}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Bulk Delete ───────────────────────────────────────────────────────────────────────────── */}
       <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
         <AlertDialogContent className="bg-card border-border text-foreground">
           <AlertDialogHeader>

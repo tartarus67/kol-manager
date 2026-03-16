@@ -141,6 +141,17 @@ export async function bulkUpdateStatus(
   return { updated: ids.length };
 }
 
+export async function bulkEditKols(
+  ids: number[],
+  data: Partial<Pick<InsertKol, "region" | "postLanguage" | "category" | "tier">>
+): Promise<{ updated: number }> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  if (ids.length === 0) return { updated: 0 };
+  await db.update(kols).set(data).where(inArray(kols.id, ids));
+  return { updated: ids.length };
+}
+
 // ─── Enrichment helpers ───────────────────────────────────────────────────────
 
 export async function updateKolEnrichment(

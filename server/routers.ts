@@ -14,6 +14,7 @@ import {
   importHandles,
   bulkDeleteKols,
   bulkUpdateStatus,
+  bulkEditKols,
   updateKolEnrichment,
   listFolders,
   getFolderById,
@@ -158,6 +159,31 @@ const kolRouter = router({
       folderId: z.number(),
     }))
     .mutation(({ input }) => addKolsToFolder(input.ids, input.folderId)),
+
+  bulkEdit: protectedProcedure
+    .input(z.object({
+      ids: z.array(z.number()).min(1),
+      region: z.string().optional(),
+      postLanguage: z.string().optional(),
+      category: z.string().optional(),
+      tier: z.string().optional(),
+      folderId: z.number().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const { ids, folderId, ...fields } = input;
+      const updateData: Partial<Record<string, string>> = {};
+      if (fields.region !== undefined) updateData.region = fields.region;
+      if (fields.postLanguage !== undefined) updateData.postLanguage = fields.postLanguage;
+      if (fields.category !== undefined) updateData.category = fields.category;
+      if (fields.tier !== undefined) updateData.tier = fields.tier;
+      if (Object.keys(updateData).length > 0) {
+        await bulkEditKols(ids, updateData as any);
+      }
+      if (folderId !== undefined) {
+        await addKolsToFolder(ids, folderId);
+      }
+      return { updated: ids.length };
+    }),
 
   // ─── Handle/URL import ────────────────────────────────────────────────────
   // Each entry can be: @handle, handle, https://x.com/handle, https://twitter.com/handle

@@ -90,3 +90,13 @@
 - [ ] UI: avatar image in KolDetail and KolList table
 - [ ] UI: bio, postLanguage, verified badge, accountCreatedAt in KolDetail
 - [ ] UI: avgLikes, avgRetweets, avgReplies in metrics grid
+
+## Bulk Edit
+- [ ] Server: bulkEdit procedure (ids[], region?, postLanguage?, folderId?)
+- [ ] UI: Edit button in bulk actions bar
+- [ ] UI: Bulk edit modal with region, language, folder fields (all optional)
+- [ ] UI: Apply only non-empty fields to all selected KOLs
+
+## postLanguage Fix + KOL List Display
+- [ ] Fix: verify enrichment writes postLanguage to DB (check updateKol accepts new fields)
+- [ ] Add postLanguage column to KOL Database table
