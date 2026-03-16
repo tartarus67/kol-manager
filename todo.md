@@ -119,3 +119,9 @@
 - [ ] Frontend: Export CSV button on saved reports
 - [ ] Frontend: Delete saved report
 - [ ] Sidebar nav: Reports link
+
+## Reports UI Improvements
+- [ ] Smart keyword input: single bar, auto-detect AND/OR from natural language
+- [ ] Calendar date picker (dropdown) for start and end dates
+- [ ] Add Views, QT (quotes), Saves/Bookmarks columns to results table
+- [ ] Server: return views, quotes, bookmarks from X API search results

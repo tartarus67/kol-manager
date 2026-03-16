@@ -238,6 +238,8 @@ export const reportResults = mysqlTable("report_results", {
   replies: int("replies").default(0),
   quotes: int("quotes").default(0),
   impressions: bigint("impressions", { mode: "number" }),
+  views: bigint("views", { mode: "number" }),
+  bookmarks: int("bookmarks"),
 
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

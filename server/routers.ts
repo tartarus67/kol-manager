@@ -515,6 +515,8 @@ const reportRouter = router({
           replies: m.reply_count ?? 0,
           quotes: m.quote_count ?? 0,
           impressions: m.impression_count ?? null,
+          views: m.impression_count ?? null,
+          bookmarks: m.bookmark_count ?? null,
         };
       });
 
@@ -557,6 +559,8 @@ const reportRouter = router({
         replies: z.number().optional(),
         quotes: z.number().optional(),
         impressions: z.number().nullable().optional(),
+        views: z.number().nullable().optional(),
+        bookmarks: z.number().nullable().optional(),
       })),
     }))
     .mutation(async ({ input }) => {
@@ -587,6 +591,8 @@ const reportRouter = router({
         replies: r.replies ?? 0,
         quotes: r.quotes ?? 0,
         impressions: r.impressions ?? null,
+        views: r.views ?? null,
+        bookmarks: r.bookmarks ?? null,
       })));
       return { reportId };
     }),
@@ -597,13 +603,13 @@ const reportRouter = router({
       const report = await getReportById(input.id);
       if (!report) throw new Error("Report not found");
       const results = await getReportResults(input.id);
-      const headers = ["Tweet ID", "Author Handle", "Author Name", "Content", "Posted At", "Language", "Likes", "Retweets", "Replies", "Quotes", "URL"];
+      const headers = ["Tweet ID", "Author Handle", "Author Name", "Content", "Posted At", "Language", "Likes", "Retweets", "Replies", "Quotes", "Views", "Bookmarks", "URL"];
       const escape = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
       const rows = results.map(r => [
         escape(r.tweetId), escape(r.authorHandle), escape(r.authorName),
         escape(r.content), escape(r.postedAt ? new Date(r.postedAt).toISOString() : ""),
         escape(r.language), escape(r.likes), escape(r.retweets), escape(r.replies),
-        escape(r.quotes), escape(r.url),
+        escape(r.quotes), escape(r.views ?? ""), escape(r.bookmarks ?? ""), escape(r.url),
       ].join(","));
       return { csv: [headers.join(","), ...rows].join("\n"), filename: `${report.name.replace(/[^a-z0-9]/gi, "_")}.csv` };
     }),

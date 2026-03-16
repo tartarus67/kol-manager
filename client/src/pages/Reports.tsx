@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -6,12 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   Search, Plus, X, Save, Download, Trash2, FileText,
   ChevronRight, Calendar, Users, Globe, Folder, AlertCircle,
-  ExternalLink, ArrowLeft
+  ExternalLink, ArrowLeft, ChevronLeft, ChevronDown
 } from "lucide-react";
 
 type SearchResult = {
@@ -28,6 +27,8 @@ type SearchResult = {
   replies?: number;
   quotes?: number;
   impressions?: number | null;
+  views?: number | null;
+  bookmarks?: number | null;
 };
 
 type SavedReport = {
@@ -59,16 +60,287 @@ const LANGUAGES = [
   { code: "th", label: "Thai" },
 ];
 
+// ── Smart keyword parser ────────────────────────────────────────────────────
+// Parses natural language input into keywords + mode
+// "@AethirCloud $ATH" → ["@AethirCloud", "$ATH"] AND
+// "aethir OR cloud" → ["aethir", "cloud"] OR
+// "aethir cloud" → ["aethir", "cloud"] AND
+function parseSmartKeywords(input: string): { keywords: string[]; mode: "AND" | "OR" } {
+  const trimmed = input.trim();
+  if (!trimmed) return { keywords: [], mode: "AND" };
+
+  // Check for explicit OR
+  if (/\bOR\b/i.test(trimmed)) {
+    const parts = trimmed.split(/\bOR\b/i).map(s => s.trim()).filter(Boolean);
+    return { keywords: parts, mode: "OR" };
+  }
+
+  // Split on whitespace (handles @handles, $tickers, quoted strings)
+  const tokens: string[] = [];
+  const regex = /"[^"]+"|'[^']+'|\S+/g;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(trimmed)) !== null) {
+    tokens.push(m[0].replace(/^["']|["']$/g, ""));
+  }
+
+  return { keywords: tokens, mode: "AND" };
+}
+
+// ── Mini Calendar Picker ────────────────────────────────────────────────────
+function CalendarPicker({
+  value,
+  onChange,
+  placeholder,
+  maxDate,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  maxDate?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(() => {
+    if (value) return new Date(value).getFullYear();
+    return new Date().getFullYear();
+  });
+  const [viewMonth, setViewMonth] = useState(() => {
+    if (value) return new Date(value).getMonth();
+    return new Date().getMonth();
+  });
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay();
+  const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const DAY_NAMES = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
+  function selectDate(day: number) {
+    const d = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (maxDate && d > maxDate) return;
+    onChange(d);
+    setOpen(false);
+  }
+
+  function prevMonth() {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
+    else setViewMonth(m => m - 1);
+  }
+  function nextMonth() {
+    if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); }
+    else setViewMonth(m => m + 1);
+  }
+
+  const selectedDay = value ? new Date(value + "T00:00:00").getDate() : null;
+  const selectedMonth = value ? new Date(value + "T00:00:00").getMonth() : null;
+  const selectedYear = value ? new Date(value + "T00:00:00").getFullYear() : null;
+
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-3 py-2 rounded-md border border-border bg-background text-sm text-left hover:border-[#D8FE51]/50 transition-colors"
+      >
+        <span className={value ? "text-foreground" : "text-muted-foreground"}>
+          {value || placeholder}
+        </span>
+        <div className="flex items-center gap-1">
+          {value && (
+            <span
+              role="button"
+              onClick={e => { e.stopPropagation(); onChange(""); }}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-3 h-3" />
+            </span>
+          )}
+          <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+        </div>
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-64 bg-card border border-border rounded-lg shadow-xl p-3">
+          {/* Month nav */}
+          <div className="flex items-center justify-between mb-2">
+            <button onClick={prevMonth} className="p-1 hover:bg-accent rounded">
+              <ChevronLeft className="w-4 h-4 text-muted-foreground" />
+            </button>
+            <span className="text-sm font-semibold text-foreground">
+              {MONTH_NAMES[viewMonth]} {viewYear}
+            </span>
+            <button onClick={nextMonth} className="p-1 hover:bg-accent rounded">
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            </button>
+          </div>
+
+          {/* Day headers */}
+          <div className="grid grid-cols-7 mb-1">
+            {DAY_NAMES.map(d => (
+              <div key={d} className="text-center text-[10px] text-muted-foreground py-1">{d}</div>
+            ))}
+          </div>
+
+          {/* Days grid */}
+          <div className="grid grid-cols-7 gap-0.5">
+            {Array.from({ length: firstDayOfWeek }).map((_, i) => (
+              <div key={`empty-${i}`} />
+            ))}
+            {Array.from({ length: daysInMonth }).map((_, i) => {
+              const day = i + 1;
+              const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+              const isSelected = day === selectedDay && viewMonth === selectedMonth && viewYear === selectedYear;
+              const isToday = dateStr === todayStr;
+              const isDisabled = maxDate ? dateStr > maxDate : false;
+              return (
+                <button
+                  key={day}
+                  onClick={() => !isDisabled && selectDate(day)}
+                  disabled={isDisabled}
+                  className={`
+                    text-center text-xs py-1.5 rounded transition-colors
+                    ${isSelected ? "bg-[#D8FE51] text-black font-bold" : ""}
+                    ${isToday && !isSelected ? "border border-[#D8FE51]/50 text-[#D8FE51]" : ""}
+                    ${!isSelected && !isDisabled ? "hover:bg-accent text-foreground" : ""}
+                    ${isDisabled ? "opacity-30 cursor-not-allowed text-muted-foreground" : "cursor-pointer"}
+                  `}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Quick shortcuts */}
+          <div className="flex gap-1 mt-2 pt-2 border-t border-border">
+            {[
+              { label: "Today", days: 0 },
+              { label: "-3d", days: 3 },
+              { label: "-7d", days: 7 },
+            ].map(({ label, days }) => {
+              const d = new Date();
+              d.setDate(d.getDate() - days);
+              const str = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+              return (
+                <button
+                  key={label}
+                  onClick={() => { onChange(str); setOpen(false); }}
+                  className="flex-1 text-[10px] py-1 rounded bg-accent hover:bg-accent/80 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Smart Search Bar ────────────────────────────────────────────────────────
+function SmartSearchBar({
+  value,
+  onChange,
+  onParse,
+  parsedKeywords,
+  parsedMode,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onParse: (keywords: string[], mode: "AND" | "OR") => void;
+  parsedKeywords: string[];
+  parsedMode: "AND" | "OR";
+}) {
+  const [focused, setFocused] = useState(false);
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const parsed = parseSmartKeywords(value);
+      onParse(parsed.keywords, parsed.mode);
+    }
+  }
+
+  function handleChange(v: string) {
+    onChange(v);
+    // Live parse preview
+    if (v.trim()) {
+      const parsed = parseSmartKeywords(v);
+      onParse(parsed.keywords, parsed.mode);
+    } else {
+      onParse([], "AND");
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className={`flex items-center gap-2 px-3 py-2 rounded-md border transition-colors bg-background ${focused ? "border-[#D8FE51]/60" : "border-border"}`}>
+        <Search className="w-4 h-4 text-muted-foreground shrink-0" />
+        <input
+          type="text"
+          value={value}
+          onChange={e => handleChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder='e.g. @AethirCloud $ATH  or  "aethir OR cloud"'
+          className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
+        />
+        {value && (
+          <button onClick={() => { onChange(""); onParse([], "AND"); }} className="text-muted-foreground hover:text-foreground">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      {parsedKeywords.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Parsed:</span>
+          {parsedKeywords.map((kw, i) => (
+            <span key={kw} className="flex items-center gap-1">
+              <Badge variant="secondary" className="text-xs px-2 py-0.5">{kw}</Badge>
+              {i < parsedKeywords.length - 1 && (
+                <span className={`text-[10px] font-bold ${parsedMode === "OR" ? "text-amber-400" : "text-[#D8FE51]"}`}>
+                  {parsedMode}
+                </span>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <p className="text-[10px] text-muted-foreground">
+        Separate with spaces for AND · use "OR" between terms for OR · supports @handles and $tickers
+      </p>
+    </div>
+  );
+}
+
 export default function Reports() {
   const [view, setView] = useState<"list" | "search" | "detail">("list");
   const [selectedReportId, setSelectedReportId] = useState<number | null>(null);
 
-  // Search form state
+  // Smart search bar state
+  const [searchBarValue, setSearchBarValue] = useState("");
   const [keywords, setKeywords] = useState<string[]>([]);
-  const [keywordInput, setKeywordInput] = useState("");
-  const [keywordMode, setKeywordMode] = useState<"AND" | "OR">("OR");
+  const [keywordMode, setKeywordMode] = useState<"AND" | "OR">("AND");
+
+  // Date range state
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+
+  // Filter state
   const [selectedKolIds, setSelectedKolIds] = useState<number[]>([]);
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
@@ -90,7 +362,7 @@ export default function Reports() {
   const [showKolDropdown, setShowKolDropdown] = useState(false);
 
   // Data queries
-  const { data: kolsData, isLoading: kolsLoading } = trpc.kol.list.useQuery({});
+  const { data: kolsData } = trpc.kol.list.useQuery({});
   const { data: foldersData } = trpc.folder.list.useQuery();
   const { data: reportsData, refetch: refetchReports } = trpc.report.list.useQuery();
   const { data: reportDetail } = trpc.report.getById.useQuery(
@@ -155,17 +427,6 @@ export default function Reports() {
     return Array.from(regions).sort();
   }, [kols]);
 
-  function addKeyword() {
-    const kw = keywordInput.trim();
-    if (!kw || keywords.includes(kw)) return;
-    setKeywords(prev => [...prev, kw]);
-    setKeywordInput("");
-  }
-
-  function removeKeyword(kw: string) {
-    setKeywords(prev => prev.filter(k => k !== kw));
-  }
-
   function toggleKol(id: number) {
     setSelectedKolIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
@@ -190,7 +451,7 @@ export default function Reports() {
   }
 
   function handleSearch() {
-    if (keywords.length === 0) { toast.error("Add at least one keyword"); return; }
+    if (keywords.length === 0) { toast.error("Enter at least one keyword"); return; }
     searchMutation.mutate({
       keywords,
       keywordMode,
@@ -238,9 +499,9 @@ export default function Reports() {
   }
 
   function resetSearch() {
+    setSearchBarValue("");
     setKeywords([]);
-    setKeywordInput("");
-    setKeywordMode("OR");
+    setKeywordMode("AND");
     setStartDate("");
     setEndDate("");
     setSelectedKolIds([]);
@@ -302,11 +563,12 @@ export default function Reports() {
                       <div className="flex items-center gap-3">
                         <FileText className="w-4 h-4 text-[#D8FE51] shrink-0" />
                         <span className="font-medium text-foreground truncate">{report.name}</span>
-                        <Badge variant="outline" className="text-xs shrink-0">{report.keywordMode ?? "OR"}</Badge>
+                        <Badge variant="outline" className="text-xs shrink-0">{report.keywordMode ?? "AND"}</Badge>
                       </div>
                       <div className="flex items-center gap-4 mt-1 ml-7">
                         <span className="text-xs text-muted-foreground">
-                          {kws.slice(0, 3).map((k: string) => `"${k}"`).join(", ")}{kws.length > 3 ? ` +${kws.length - 3}` : ""}
+                          {kws.slice(0, 3).map((k: string) => `"${k}"`).join(`, `)}
+                          {kws.length > 3 ? ` +${kws.length - 3}` : ""}
                         </span>
                         {(report.startDate || report.endDate) && (
                           <span className="text-xs text-muted-foreground">
@@ -361,7 +623,7 @@ export default function Reports() {
               <div>
                 <h1 className="text-xl font-bold text-foreground">{report.name}</h1>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {kws.map((k: string) => `"${k}"`).join(` ${report.keywordMode ?? "OR"} `)}
+                  {kws.map((k: string) => `"${k}"`).join(` ${report.keywordMode ?? "AND"} `)}
                   {report.startDate && ` · ${report.startDate} → ${report.endDate ?? "now"}`}
                   {` · ${results.length} results`}
                 </p>
@@ -416,53 +678,22 @@ export default function Reports() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left: Search config */}
           <div className="lg:col-span-1 space-y-4">
-            {/* Keywords */}
+
+            {/* Smart Keywords */}
             <Card className="bg-card border-border">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
                   <Search className="w-4 h-4 text-[#D8FE51]" /> Keywords
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Add keyword..."
-                    value={keywordInput}
-                    onChange={e => setKeywordInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addKeyword(); } }}
-                    className="bg-background border-border text-sm"
-                  />
-                  <Button size="sm" variant="outline" onClick={addKeyword} className="border-border shrink-0">
-                    <Plus className="w-4 h-4" />
-                  </Button>
-                </div>
-                {keywords.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {keywords.map(kw => (
-                      <Badge key={kw} variant="secondary" className="flex items-center gap-1 text-xs">
-                        {kw}
-                        <button onClick={() => removeKeyword(kw)} className="ml-1 hover:text-red-400">
-                          <X className="w-3 h-3" />
-                        </button>
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Mode:</span>
-                  <Select value={keywordMode} onValueChange={(v) => setKeywordMode(v as "AND" | "OR")}>
-                    <SelectTrigger className="h-7 w-20 text-xs bg-background border-border">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="OR">OR</SelectItem>
-                      <SelectItem value="AND">AND</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <span className="text-xs text-muted-foreground">
-                    {keywordMode === "OR" ? "Any keyword matches" : "All keywords must appear"}
-                  </span>
-                </div>
+              <CardContent>
+                <SmartSearchBar
+                  value={searchBarValue}
+                  onChange={setSearchBarValue}
+                  onParse={(kws, mode) => { setKeywords(kws); setKeywordMode(mode); }}
+                  parsedKeywords={keywords}
+                  parsedMode={keywordMode}
+                />
               </CardContent>
             </Card>
 
@@ -476,11 +707,20 @@ export default function Reports() {
               <CardContent className="space-y-2">
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Start date</label>
-                  <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-background border-border text-sm" />
+                  <CalendarPicker
+                    value={startDate}
+                    onChange={setStartDate}
+                    placeholder="Pick start date"
+                    maxDate={endDate || undefined}
+                  />
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">End date</label>
-                  <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-background border-border text-sm" />
+                  <CalendarPicker
+                    value={endDate}
+                    onChange={setEndDate}
+                    placeholder="Pick end date"
+                  />
                 </div>
                 <p className="text-xs text-amber-400 flex items-center gap-1">
                   <AlertCircle className="w-3 h-3" />
@@ -508,11 +748,11 @@ export default function Reports() {
                   />
                   {showKolDropdown && filteredKols.length > 0 && (
                     <div className="absolute z-10 w-full mt-1 bg-card border border-border rounded-md shadow-lg max-h-40 overflow-y-auto">
-                      {filteredKols.map(k => (
+                      {filteredKols.map((k: any) => (
                         <div
                           key={k.id}
-                          className={`px-3 py-2 text-sm cursor-pointer hover:bg-accent flex items-center justify-between ${selectedKolIds.includes(k.id) ? "text-[#D8FE51]" : "text-foreground"}`}
-                          onClick={() => { toggleKol(k.id); setKolSearch(""); setShowKolDropdown(false); }}
+                          className={`flex items-center justify-between px-3 py-2 cursor-pointer text-sm transition-colors ${selectedKolIds.includes(k.id) ? "bg-[#D8FE51]/10 text-[#D8FE51]" : "hover:bg-accent text-foreground"}`}
+                          onClick={() => { toggleKol(k.id); setShowKolDropdown(false); setKolSearch(""); }}
                         >
                           <span>@{k.handle}</span>
                           {selectedKolIds.includes(k.id) && <span className="text-xs">✓</span>}
@@ -524,48 +764,46 @@ export default function Reports() {
                 {selectedKolIds.length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {selectedKolIds.map(id => {
-                      const kol = kols.find(k => k.id === id);
-                      return kol ? (
+                      const k = kols.find((x: any) => x.id === id);
+                      return k ? (
                         <Badge key={id} variant="secondary" className="text-xs flex items-center gap-1">
-                          @{kol.handle}
-                          <button onClick={() => toggleKol(id)}><X className="w-3 h-3" /></button>
+                          @{k.handle}
+                          <button onClick={() => toggleKol(id)} className="ml-1 hover:text-red-400">
+                            <X className="w-3 h-3" />
+                          </button>
                         </Badge>
                       ) : null;
                     })}
                   </div>
                 )}
-                {selectedKolIds.length > 20 && (
-                  <p className="text-xs text-amber-400 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" /> X API supports max 20 KOLs per search
-                  </p>
-                )}
               </CardContent>
             </Card>
 
-            {/* Folders */}
-            <Card className="bg-card border-border">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <Folder className="w-4 h-4 text-[#D8FE51]" /> Folders
-                  {selectedFolderIds.length > 0 && <Badge className="bg-[#D8FE51] text-black text-xs">{selectedFolderIds.length}</Badge>}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {folders.map((f: any) => (
-                    <div
-                      key={f.id}
-                      className={`flex items-center justify-between px-2 py-1.5 rounded cursor-pointer text-sm transition-colors ${selectedFolderIds.includes(f.id) ? "bg-[#D8FE51]/10 text-[#D8FE51]" : "hover:bg-accent text-foreground"}`}
-                      onClick={() => toggleFolder(f.id)}
-                    >
-                      <span>{f.name}</span>
-                      {selectedFolderIds.includes(f.id) && <span className="text-xs">✓</span>}
-                    </div>
-                  ))}
-                  {folders.length === 0 && <p className="text-xs text-muted-foreground">No folders yet</p>}
-                </div>
-              </CardContent>
-            </Card>
+            {/* Folder Filter */}
+            {folders.length > 0 && (
+              <Card className="bg-card border-border">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+                    <Folder className="w-4 h-4 text-[#D8FE51]" /> Folders
+                    {selectedFolderIds.length > 0 && <Badge className="bg-[#D8FE51] text-black text-xs">{selectedFolderIds.length}</Badge>}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {folders.map((f: any) => (
+                      <div
+                        key={f.id}
+                        className={`flex items-center justify-between px-2 py-1.5 rounded cursor-pointer text-sm transition-colors ${selectedFolderIds.includes(f.id) ? "bg-[#D8FE51]/10 text-[#D8FE51]" : "hover:bg-accent text-foreground"}`}
+                        onClick={() => toggleFolder(f.id)}
+                      >
+                        <span>{f.name}</span>
+                        {selectedFolderIds.includes(f.id) && <span className="text-xs">✓</span>}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Language */}
             <Card className="bg-card border-border">
@@ -742,13 +980,16 @@ function ResultsTable({ results, formatDate, formatNum }: {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/30">
-            <th className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground">Author</th>
+            <th className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">Author</th>
             <th className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground">Content</th>
-            <th className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground">Date</th>
+            <th className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">Date</th>
             <th className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground">Lang</th>
+            <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground">Views</th>
             <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground">Likes</th>
             <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground">RT</th>
             <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground">Replies</th>
+            <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground">QT</th>
+            <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground">Saves</th>
             <th className="px-3 py-2.5 text-xs font-semibold text-muted-foreground">Link</th>
           </tr>
         </thead>
@@ -756,7 +997,7 @@ function ResultsTable({ results, formatDate, formatNum }: {
           {results.map((r, i) => (
             <tr key={r.tweetId ?? i} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
               <td className="px-3 py-2.5">
-                <div className="font-medium text-foreground text-xs">@{r.authorHandle}</div>
+                <div className="font-medium text-foreground text-xs whitespace-nowrap">@{r.authorHandle}</div>
                 {r.authorName && <div className="text-xs text-muted-foreground truncate max-w-[100px]">{r.authorName}</div>}
                 {r.kolId && <Badge variant="outline" className="text-[10px] mt-0.5 border-[#D8FE51]/40 text-[#D8FE51]">KOL</Badge>}
               </td>
@@ -765,9 +1006,12 @@ function ResultsTable({ results, formatDate, formatNum }: {
               </td>
               <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.postedAt)}</td>
               <td className="px-3 py-2.5 text-xs text-muted-foreground uppercase">{r.language ?? "—"}</td>
+              <td className="px-3 py-2.5 text-xs text-right text-muted-foreground">{formatNum(r.views)}</td>
               <td className="px-3 py-2.5 text-xs text-right text-foreground">{formatNum(r.likes)}</td>
               <td className="px-3 py-2.5 text-xs text-right text-foreground">{formatNum(r.retweets)}</td>
               <td className="px-3 py-2.5 text-xs text-right text-foreground">{formatNum(r.replies)}</td>
+              <td className="px-3 py-2.5 text-xs text-right text-foreground">{formatNum(r.quotes)}</td>
+              <td className="px-3 py-2.5 text-xs text-right text-muted-foreground">{formatNum(r.bookmarks)}</td>
               <td className="px-3 py-2.5">
                 {r.url && (
                   <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-[#D8FE51] hover:text-[#c8ee41]">
