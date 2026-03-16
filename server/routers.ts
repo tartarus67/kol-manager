@@ -372,25 +372,124 @@ async function enrichSingleKol(
 ): Promise<{ success: boolean; reason?: string; message?: string }> {
   try {
     await updateKolEnrichment(id, { enrichmentStatus: "pending" });
-    const url = `https://api.twitter.com/2/users/by/username/${encodeURIComponent(handle)}?user.fields=public_metrics,description,profile_image_url,url`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${bearerToken}` } });
-    if (!res.ok) {
-      const body = await res.text();
+
+    // 1. Fetch user profile
+    const userUrl = `https://api.twitter.com/2/users/by/username/${encodeURIComponent(handle)}?user.fields=public_metrics,description,profile_image_url,location,created_at,verified,verified_type`;
+    const userRes = await fetch(userUrl, { headers: { Authorization: `Bearer ${bearerToken}` } });
+    if (!userRes.ok) {
+      const body = await userRes.text();
       await updateKolEnrichment(id, { enrichmentStatus: "failed" });
-      return { success: false, reason: `X_API_ERROR_${res.status}`, message: `X API returned ${res.status}: ${body.slice(0, 200)}` };
+      return { success: false, reason: `X_API_ERROR_${userRes.status}`, message: `X API returned ${userRes.status}: ${body.slice(0, 200)}` };
     }
-    const json = await res.json() as any;
-    const user = json?.data;
+    const userJson = await userRes.json() as any;
+    const user = userJson?.data;
     if (!user) {
       await updateKolEnrichment(id, { enrichmentStatus: "failed" });
       return { success: false, reason: "USER_NOT_FOUND", message: `@${handle} not found on X` };
     }
     const metrics = user.public_metrics ?? {};
+
+    // 2. Fetch recent tweets mentioning @AethirCloud (fallback to general timeline)
+    const userId = user.id;
+    let tweets: any[] = [];
+    try {
+      // First try: search tweets by this user mentioning @AethirCloud (last 7 days)
+      const searchUrl = `https://api.twitter.com/2/tweets/search/recent?query=from:${encodeURIComponent(handle)}%20@AethirCloud&max_results=10&tweet.fields=public_metrics,lang`;
+      const searchRes = await fetch(searchUrl, { headers: { Authorization: `Bearer ${bearerToken}` } });
+      if (searchRes.ok) {
+        const searchJson = await searchRes.json() as any;
+        tweets = searchJson?.data ?? [];
+      }
+    } catch (_) {}
+    // Fallback: general timeline if no Aethir tweets found
+    if (tweets.length === 0) {
+      try {
+        const timelineUrl = `https://api.twitter.com/2/users/${userId}/tweets?max_results=10&tweet.fields=public_metrics,lang&exclude=retweets,replies`;
+        const tlRes = await fetch(timelineUrl, { headers: { Authorization: `Bearer ${bearerToken}` } });
+        if (tlRes.ok) {
+          const tlJson = await tlRes.json() as any;
+          tweets = tlJson?.data ?? [];
+        }
+      } catch (_) {}
+    }
+
+    // 3. Compute engagement averages from tweets
+    let avgLikes: number | undefined;
+    let avgRetweets: number | undefined;
+    let avgReplies: number | undefined;
+    let postLanguage: string | undefined;
+    if (tweets.length > 0) {
+      const totalLikes = tweets.reduce((s: number, t: any) => s + (t.public_metrics?.like_count ?? 0), 0);
+      const totalRetweets = tweets.reduce((s: number, t: any) => s + (t.public_metrics?.retweet_count ?? 0), 0);
+      const totalReplies = tweets.reduce((s: number, t: any) => s + (t.public_metrics?.reply_count ?? 0), 0);
+      avgLikes = Math.round((totalLikes / tweets.length) * 100) / 100;
+      avgRetweets = Math.round((totalRetweets / tweets.length) * 100) / 100;
+      avgReplies = Math.round((totalReplies / tweets.length) * 100) / 100;
+      // Majority language
+      const langCounts: Record<string, number> = {};
+      for (const t of tweets) { const l = t.lang; if (l && l !== 'und') langCounts[l] = (langCounts[l] ?? 0) + 1; }
+      const sortedLangs = Object.entries(langCounts).sort((a, b) => b[1] - a[1]);
+      postLanguage = sortedLangs[0]?.[0];
+    }
+
+    // 4. Compute engagement rate
+    const followerCount = metrics.followers_count ?? 0;
+    let engagementRate: number | undefined;
+    if (followerCount > 0 && tweets.length > 0) {
+      const totalEng = tweets.reduce((s: number, t: any) => {
+        const m = t.public_metrics ?? {};
+        return s + (m.like_count ?? 0) + (m.retweet_count ?? 0) + (m.reply_count ?? 0) + (m.quote_count ?? 0);
+      }, 0);
+      engagementRate = Math.round((totalEng / tweets.length / followerCount) * 10000) / 100;
+    }
+
+    // 5. Normalize location via LLM
+    let normalizedRegion: string | undefined;
+    const rawLocation = user.location;
+    if (rawLocation) {
+      try {
+        const { invokeLLM } = await import("./_core/llm");
+        const llmRes = await invokeLLM({
+          messages: [
+            { role: "system", content: "You are a location normalizer. Given a raw location string from a social media profile, return ONLY the country name in English (e.g. 'South Korea', 'Turkey', 'India', 'United States'). If you cannot determine the country, return 'Unknown'. Return nothing else." },
+            { role: "user", content: rawLocation },
+          ],
+        });
+        const rawContent = llmRes?.choices?.[0]?.message?.content;
+        const country = typeof rawContent === 'string' ? rawContent.trim() : undefined;
+        if (country && country !== 'Unknown') normalizedRegion = country;
+      } catch (_) {}
+    }
+
+    // 6. Verified status
+    let verifiedStatus: string = "none";
+    if (user.verified_type) verifiedStatus = user.verified_type; // blue, business, government
+    else if (user.verified === true) verifiedStatus = "blue";
+
+    // 7. Account created at
+    const accountCreatedAt = user.created_at ? new Date(user.created_at) : undefined;
+
+    // 8. Profile image — use original size (remove _normal suffix)
+    const profileImageUrl = user.profile_image_url
+      ? user.profile_image_url.replace(/_normal\./, '.')
+      : undefined;
+
+    // 9. Write all fields
     await updateKol(id, {
       displayName: user.name ?? undefined,
       followers: metrics.followers_count ?? undefined,
       profileUrl: `https://x.com/${handle}`,
       platform: "X",
+      profileBio: user.description ?? undefined,
+      profileImageUrl,
+      postLanguage,
+      accountCreatedAt,
+      verified: verifiedStatus,
+      avgLikes,
+      avgRetweets,
+      avgReplies,
+      ...(engagementRate !== undefined ? { engagementRate } : {}),
+      ...(normalizedRegion ? { region: normalizedRegion } : {}),
     });
     await updateKolEnrichment(id, { enrichmentStatus: "done", enrichedAt: new Date() });
     return { success: true };

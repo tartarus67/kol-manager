@@ -80,3 +80,13 @@
 - [x] Dedup applies to both handle-only import and full campaign CSV import
 - [x] Import result summary shows: inserted, skipped (already exists), skipped (duplicate in batch)
 - [x] Campaign CSV: if KOL already exists, still append new posts to existing KOL record (upsert logic)
+
+## Expanded X API Enrichment
+- [ ] DB: add profileImageUrl, profileBio, postLanguage, accountCreatedAt, verified, avgLikes, avgRetweets, avgReplies columns
+- [ ] Server: normalize location to country via LLM
+- [ ] Server: postLanguage from majority lang of last 10 tweets (Aethir-keyword first, fallback general)
+- [ ] Server: pull profileBio, profileImageUrl, accountCreatedAt, verified from X user object
+- [ ] Server: avgLikes, avgRetweets, avgReplies from @AethirCloud tweets (fallback to general)
+- [ ] UI: avatar image in KolDetail and KolList table
+- [ ] UI: bio, postLanguage, verified badge, accountCreatedAt in KolDetail
+- [ ] UI: avgLikes, avgRetweets, avgReplies in metrics grid

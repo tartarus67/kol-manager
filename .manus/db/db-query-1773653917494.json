@@ -1,0 +1,9 @@
+{
+  "query": "\nALTER TABLE kols\n  ADD COLUMN profileImageUrl VARCHAR(512) NULL,\n  ADD COLUMN profileBio TEXT NULL,\n  ADD COLUMN postLanguage VARCHAR(32) NULL,\n  ADD COLUMN accountCreatedAt TIMESTAMP NULL,\n  ADD COLUMN verified VARCHAR(32) NULL,\n  ADD COLUMN avgLikes DECIMAL(10,2) NULL,\n  ADD COLUMN avgRetweets DECIMAL(10,2) NULL,\n  ADD COLUMN avgReplies DECIMAL(10,2) NULL;\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user s8wnVbZA4yzfrg7.8ebc791ac56d --database DZjTmaPHn9nCzaD9AuvmrW --execute \nALTER TABLE kols\n  ADD COLUMN profileImageUrl VARCHAR(512) NULL,\n  ADD COLUMN profileBio TEXT NULL,\n  ADD COLUMN postLanguage VARCHAR(32) NULL,\n  ADD COLUMN accountCreatedAt TIMESTAMP NULL,\n  ADD COLUMN verified VARCHAR(32) NULL,\n  ADD COLUMN avgLikes DECIMAL(10,2) NULL,\n  ADD COLUMN avgRetweets DECIMAL(10,2) NULL,\n  ADD COLUMN avgReplies DECIMAL(10,2) NULL;\n",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1202
+}

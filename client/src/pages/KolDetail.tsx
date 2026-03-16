@@ -12,7 +12,7 @@ import {
 import { trpc } from "@/lib/trpc";
 import {
   ArrowLeft, Edit2, ExternalLink, Users, TrendingUp, BarChart2,
-  Star, Tag, MapPin, DollarSign, FileText, Zap,
+  Star, Tag, MapPin, DollarSign, FileText, Zap, BadgeCheck, Globe, Calendar, Heart, Repeat2, MessageCircle,
 } from "lucide-react";
 import { useState } from "react";
 import { useLocation, useParams } from "wouter";
@@ -180,14 +180,30 @@ export default function KolDetail() {
         {/* Identity Card */}
         <div className="rounded-xl border border-border bg-card p-6">
           <div className="flex items-start gap-4 flex-wrap">
-            <div className="h-16 w-16 rounded-full bg-primary/10 border-2 border-primary/30 flex items-center justify-center text-primary text-2xl font-bold shrink-0">
-              {(kol.displayName || kol.handle).charAt(0).toUpperCase()}
-            </div>
+            {/* Avatar */}
+            {(kol as any).profileImageUrl ? (
+              <img
+                src={(kol as any).profileImageUrl}
+                alt={kol.displayName || kol.handle}
+                className="h-16 w-16 rounded-full border-2 border-primary/30 object-cover shrink-0"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
+            ) : (
+              <div className="h-16 w-16 rounded-full bg-primary/10 border-2 border-primary/30 flex items-center justify-center text-primary text-2xl font-bold shrink-0">
+                {(kol.displayName || kol.handle).charAt(0).toUpperCase()}
+              </div>
+            )}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-xl font-bold text-foreground">
                   {kol.displayName || kol.handle}
                 </h1>
+                {(kol as any).verified && (kol as any).verified !== 'none' && (
+                  <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    <BadgeCheck className="h-3 w-3" />
+                    {(kol as any).verified === 'blue' ? 'Verified' : (kol as any).verified}
+                  </span>
+                )}
                 <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColors[kol.status]}`}>
                   {kol.status}
                 </span>
@@ -195,10 +211,15 @@ export default function KolDetail() {
               <p className="text-muted-foreground text-sm mt-0.5">@{kol.handle} · {kol.platform}</p>
               <div className="flex flex-wrap gap-3 mt-2 text-xs text-muted-foreground">
                 {kol.region && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{kol.region}</span>}
+                {(kol as any).postLanguage && <span className="flex items-center gap-1"><Globe className="h-3 w-3" />Posts in: {(kol as any).postLanguage.toUpperCase()}</span>}
                 {kol.category && <span className="flex items-center gap-1"><Tag className="h-3 w-3" />{kol.category}</span>}
                 {kol.tier && <span className="flex items-center gap-1"><Star className="h-3 w-3" />{kol.tier}</span>}
+                {(kol as any).accountCreatedAt && <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />Joined {new Date((kol as any).accountCreatedAt).getFullYear()}</span>}
                 {kol.source && <span className="text-muted-foreground/60">Source: {kol.source}</span>}
               </div>
+              {(kol as any).profileBio && (
+                <p className="text-sm text-muted-foreground mt-2 leading-relaxed max-w-xl">{(kol as any).profileBio}</p>
+              )}
               {kol.profileUrl && (
                 <a
                   href={kol.profileUrl}
@@ -218,6 +239,11 @@ export default function KolDetail() {
           <MetricCard icon={<Users className="h-4 w-4" />} label="Followers" value={fmt(kol.followers)} />
           <MetricCard icon={<Users className="h-4 w-4" />} label="Smart Followers" value={fmt(kol.smartFollowers)} />
           <MetricCard icon={<TrendingUp className="h-4 w-4" />} label="Eng. Rate" value={kol.engagementRate != null ? `${Number(kol.engagementRate).toFixed(2)}%` : "—"} highlight />
+          <MetricCard icon={<Heart className="h-4 w-4" />} label="Avg Likes" value={(kol as any).avgLikes != null ? fmt(Math.round((kol as any).avgLikes)) : "—"} />
+          <MetricCard icon={<Repeat2 className="h-4 w-4" />} label="Avg Retweets" value={(kol as any).avgRetweets != null ? fmt(Math.round((kol as any).avgRetweets)) : "—"} />
+          <MetricCard icon={<MessageCircle className="h-4 w-4" />} label="Avg Replies" value={(kol as any).avgReplies != null ? fmt(Math.round((kol as any).avgReplies)) : "—"} />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <MetricCard icon={<BarChart2 className="h-4 w-4" />} label="Avg Engagement" value={fmt(kol.avgEngagement)} />
           <MetricCard icon={<BarChart2 className="h-4 w-4" />} label="Avg Impressions" value={fmt(kol.avgImpressions)} />
           <MetricCard icon={<Star className="h-4 w-4" />} label="Score" value={kol.score != null ? Number(kol.score).toFixed(2) : "—"} />

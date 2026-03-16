@@ -72,6 +72,16 @@ export const kols = mysqlTable("kols", {
   // Campaign economics
   costPerPost: decimal("costPerPost", { precision: 10, scale: 2, mode: "number" }),
 
+  // Extended X API enrichment fields
+  profileImageUrl: varchar("profileImageUrl", { length: 512 }),
+  profileBio: text("profileBio"),
+  postLanguage: varchar("postLanguage", { length: 32 }),   // ISO 639-1 majority lang from recent tweets
+  accountCreatedAt: timestamp("accountCreatedAt"),
+  verified: varchar("verified", { length: 32 }),           // none / blue / business / government
+  avgLikes: decimal("avgLikes", { precision: 10, scale: 2, mode: "number" }),
+  avgRetweets: decimal("avgRetweets", { precision: 10, scale: 2, mode: "number" }),
+  avgReplies: decimal("avgReplies", { precision: 10, scale: 2, mode: "number" }),
+
   // Admin
   status: mysqlEnum("status", ["active", "inactive", "pending"]).default("active").notNull(),
   enrichmentStatus: mysqlEnum("enrichmentStatus", ["never", "pending", "done", "failed"]).default("never").notNull(),
