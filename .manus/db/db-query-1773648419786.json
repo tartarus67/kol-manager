@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE `kols` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`handle` varchar(128) NOT NULL,\n\t`name` varchar(256),\n\t`platform` varchar(64) NOT NULL DEFAULT 'X',\n\t`category` varchar(128),\n\t`followers` int,\n\t`engagementRate` varchar(32),\n\t`contentType` varchar(128),\n\t`contentFormat` varchar(128),\n\t`tags` text,\n\t`status` enum('active','inactive','pending') NOT NULL DEFAULT 'active',\n\t`notes` text,\n\t`profileUrl` varchar(512),\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\tCONSTRAINT `kols_id` PRIMARY KEY(`id`)\n);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user s8wnVbZA4yzfrg7.8ebc791ac56d --database DZjTmaPHn9nCzaD9AuvmrW --execute CREATE TABLE `kols` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`handle` varchar(128) NOT NULL,\n\t`name` varchar(256),\n\t`platform` varchar(64) NOT NULL DEFAULT 'X',\n\t`category` varchar(128),\n\t`followers` int,\n\t`engagementRate` varchar(32),\n\t`contentType` varchar(128),\n\t`contentFormat` varchar(128),\n\t`tags` text,\n\t`status` enum('active','inactive','pending') NOT NULL DEFAULT 'active',\n\t`notes` text,\n\t`profileUrl` varchar(512),\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\tCONSTRAINT `kols_id` PRIMARY KEY(`id`)\n);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 205
+}

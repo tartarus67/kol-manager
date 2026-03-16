@@ -1,17 +1,18 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import {
+  int,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  varchar,
+  decimal,
+  bigint,
+} from "drizzle-orm/mysql-core";
 
-/**
- * Core user table backing auth flow.
- * Extend this file with additional tables as your product grows.
- * Columns use camelCase to match both database fields and generated types.
- */
+// ─── Users (auth) ────────────────────────────────────────────────────────────
+
 export const users = mysqlTable("users", {
-  /**
-   * Surrogate primary key. Auto-incremented numeric value managed by the database.
-   * Use this for relations between tables.
-   */
   id: int("id").autoincrement().primaryKey(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -25,4 +26,124 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+// ─── KOLs ────────────────────────────────────────────────────────────────────
+//
+// One row = one KOL identity. Metrics here are KOL-level aggregates
+// (audience size, overall engagement quality) — not campaign-specific.
+//
+// Metric categories captured:
+//   IDENTITY      handle, displayName, platform, profileUrl
+//   AUDIENCE      followers, smartFollowers (bot-filtered)
+//   ENGAGEMENT    engagementRate, avgEngagement, avgImpressions
+//   QUALITY       score (Cookie3 or similar), tier
+//   CLASSIFICATION region, category, contentType, contentFormat, tags
+//   CAMPAIGN      costPerPost (typical/agreed rate)
+//   ADMIN         status, notes, region, source (which sheet it came from)
+
+export const kols = mysqlTable("kols", {
+  id: int("id").autoincrement().primaryKey(),
+
+  // Identity
+  handle: varchar("handle", { length: 128 }).notNull(),
+  displayName: varchar("displayName", { length: 256 }),
+  platform: varchar("platform", { length: 64 }).notNull().default("X"),
+  profileUrl: varchar("profileUrl", { length: 512 }),
+
+  // Audience metrics
+  followers: bigint("followers", { mode: "number" }),
+  smartFollowers: int("smartFollowers"),       // Bot-filtered follower count (Cookie3)
+
+  // Engagement metrics
+  engagementRate: decimal("engagementRate", { precision: 8, scale: 4, mode: "number" }),
+  avgEngagement: decimal("avgEngagement", { precision: 12, scale: 2, mode: "number" }),
+  avgImpressions: decimal("avgImpressions", { precision: 14, scale: 2, mode: "number" }),
+
+  // Quality / scoring
+  score: decimal("score", { precision: 10, scale: 2, mode: "number" }),
+  tier: varchar("tier", { length: 32 }),                  // e.g. "1 Tier", "1.5 Tier"
+
+  // Classification
+  region: varchar("region", { length: 64 }),              // India, Korea, Turkey, Nova...
+  category: varchar("category", { length: 128 }),         // Alpha, Trading, News, etc.
+  contentType: varchar("contentType", { length: 128 }),   // Educational, Meme, Alpha, etc.
+  contentFormat: varchar("contentFormat", { length: 128 }), // Tweet, Thread, Video, etc.
+  tags: text("tags"),                                     // Comma-separated free tags
+
+  // Campaign economics
+  costPerPost: decimal("costPerPost", { precision: 10, scale: 2, mode: "number" }),
+
+  // Admin
+  status: mysqlEnum("status", ["active", "inactive", "pending"]).default("active").notNull(),
+  source: varchar("source", { length: 128 }),  // Which sheet/import batch this came from
+  notes: text("notes"),
+
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Kol = typeof kols.$inferSelect;
+export type InsertKol = typeof kols.$inferInsert;
+
+// ─── KOL Posts ───────────────────────────────────────────────────────────────
+//
+// One row = one tracked post/campaign activation.
+// Captures post-level performance metrics from campaign trackers.
+//
+// Metric categories captured:
+//   IDENTITY      kolId (FK), postUrl, platform, postDate
+//   CAMPAIGN      topic/subject, postType (Tweet/TG/Thread), campaignBudget
+//   REACH         views, impressions
+//   ENGAGEMENT    likes, comments, reposts, bookmarks, quotes, totalEngagement, engagementRate
+//   QUALITY       result (Good/Average/etc.), featured reviews
+//   ECONOMICS     costPerPost, cpm
+//   PAYMENT       walletAddress, txId, paid
+
+export const kolPosts = mysqlTable("kol_posts", {
+  id: int("id").autoincrement().primaryKey(),
+  kolId: int("kolId").notNull(),               // FK → kols.id
+
+  // Post identity
+  postUrl: varchar("postUrl", { length: 512 }),
+  platform: varchar("platform", { length: 64 }),
+  postDate: varchar("postDate", { length: 32 }),  // stored as string (formats vary: "1/16", "9/25")
+  postTitle: text("postTitle"),                   // title or content snippet
+
+  // Campaign context
+  topic: varchar("topic", { length: 256 }),       // campaign topic/subject
+  postType: varchar("postType", { length: 64 }),  // Tweet, TG post, Thread, Video, etc.
+  campaignRegion: varchar("campaignRegion", { length: 64 }),
+  campaignSubject: varchar("campaignSubject", { length: 128 }),
+
+  // Reach metrics
+  views: int("views"),
+  impressions: bigint("impressions", { mode: "number" }),
+
+  // Engagement metrics
+  likes: int("likes"),
+  comments: int("comments"),
+  reposts: int("reposts"),
+  quotes: int("quotes"),
+  bookmarks: int("bookmarks"),
+  totalEngagement: int("totalEngagement"),
+  engagementRate: decimal("engagementRate", { precision: 8, scale: 4, mode: "number" }),
+
+  // Quality assessment
+  result: varchar("result", { length: 64 }),      // Good, Average, Perfect, etc.
+  featuredReview: text("featuredReview"),
+
+  // Economics
+  costPerPost: decimal("costPerPost", { precision: 10, scale: 2, mode: "number" }),
+  cpm: decimal("cpm", { precision: 10, scale: 2, mode: "number" }),
+
+  // Payment (Korea sheets have on-chain payment data)
+  walletAddress: varchar("walletAddress", { length: 256 }),
+  txId: varchar("txId", { length: 512 }),
+  paid: varchar("paid", { length: 32 }),
+
+  source: varchar("source", { length: 128 }),     // which sheet this came from
+
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type KolPost = typeof kolPosts.$inferSelect;
+export type InsertKolPost = typeof kolPosts.$inferInsert;
