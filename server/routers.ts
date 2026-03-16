@@ -26,6 +26,12 @@ import {
   addKolsToFolder,
   removeKolsFromFolder,
   setKolFolders,
+  createReport,
+  listReports,
+  getReportById,
+  deleteReport,
+  saveReportResults,
+  getReportResults,
 } from "./db";
 import { parseCSV } from "./csvIntake";
 import { ENV } from "./_core/env";
@@ -371,6 +377,238 @@ const folderRouter = router({
     .mutation(({ input }) => removeKolsFromFolder([input.kolId], input.folderId)),
 });
 
+// ─── Report router ──────────────────────────────────────────────────────────
+
+const reportRouter = router({
+  list: protectedProcedure
+    .query(() => listReports()),
+
+  getById: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const report = await getReportById(input.id);
+      const results = report ? await getReportResults(input.id) : [];
+      return { report, results };
+    }),
+
+  delete: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(({ input }) => deleteReport(input.id)),
+
+  search: protectedProcedure
+    .input(z.object({
+      keywords: z.array(z.string().min(1)).min(1),
+      keywordMode: z.enum(["AND", "OR"]).default("OR"),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      kolIds: z.array(z.number()).optional(),
+      languages: z.array(z.string()).optional(),
+      regions: z.array(z.string()).optional(),
+      folderIds: z.array(z.number()).optional(),
+      maxResults: z.number().min(10).max(100).default(50),
+    }))
+    .mutation(async ({ input }) => {
+      const rawKey = ENV.xApiBearerToken;
+      if (!rawKey) {
+        return { success: false, reason: "X_API_KEY_MISSING", message: "X API Bearer Token not configured.", results: [] };
+      }
+      const bearerToken = decodeURIComponent(rawKey);
+
+      // Resolve KOL handles from folderIds if provided
+      let targetHandles: string[] = [];
+      let targetKolIds: number[] = input.kolIds ?? [];
+
+      if (input.folderIds && input.folderIds.length > 0) {
+        const { getKolsInFolder } = await import("./db");
+        for (const fid of input.folderIds) {
+          const folderKols = await getKolsInFolder(fid);
+          targetKolIds = [...new Set([...targetKolIds, ...folderKols.map(k => k.id)])];
+        }
+      }
+
+      // Get handles for all target KOL IDs
+      if (targetKolIds.length > 0) {
+        const allKols = await listKols();
+        const kolMap = new Map(allKols.map(k => [k.id, k]));
+        targetHandles = targetKolIds
+          .map(id => kolMap.get(id)?.handle)
+          .filter((h): h is string => !!h);
+      }
+
+      // Build X API search query
+      // AND mode: all keywords must appear
+      // OR mode: any keyword matches
+      let queryParts: string[] = [];
+
+      if (input.keywordMode === "AND") {
+        queryParts = input.keywords.map(k => k.includes(" ") ? `"${k}"` : k);
+      } else {
+        // OR: wrap in parentheses with OR
+        const orPart = input.keywords.map(k => k.includes(" ") ? `"${k}"` : k).join(" OR ");
+        queryParts = [`(${orPart})`];
+      }
+
+      // Add KOL filter: from: operators
+      if (targetHandles.length > 0 && targetHandles.length <= 20) {
+        const fromPart = targetHandles.map(h => `from:${h}`).join(" OR ");
+        queryParts.push(`(${fromPart})`);
+      }
+
+      // Add language filter
+      if (input.languages && input.languages.length === 1) {
+        queryParts.push(`lang:${input.languages[0]}`);
+      }
+
+      // Exclude retweets
+      queryParts.push("-is:retweet");
+
+      const query = queryParts.join(" ");
+
+      // Build date range params
+      const params = new URLSearchParams({
+        query,
+        max_results: String(Math.min(input.maxResults, 100)),
+        "tweet.fields": "created_at,public_metrics,lang,author_id",
+        "expansions": "author_id",
+        "user.fields": "username,name,profile_image_url",
+      });
+      if (input.startDate) params.set("start_time", new Date(input.startDate).toISOString());
+      if (input.endDate) {
+        const end = new Date(input.endDate);
+        end.setHours(23, 59, 59, 999);
+        params.set("end_time", end.toISOString());
+      }
+
+      const url = `https://api.twitter.com/2/tweets/search/recent?${params.toString()}`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${bearerToken}` } });
+
+      if (!res.ok) {
+        const body = await res.text();
+        return { success: false, reason: `X_API_ERROR_${res.status}`, message: `X API error: ${body.slice(0, 300)}`, results: [] };
+      }
+
+      const json = await res.json() as any;
+      const tweets: any[] = json?.data ?? [];
+      const users: any[] = json?.includes?.users ?? [];
+      const userMap = new Map(users.map((u: any) => [u.id, u]));
+
+      // Match tweets to KOLs in our DB
+      const allKols = await listKols();
+      const handleToKolId = new Map(allKols.map(k => [k.handle.toLowerCase(), k.id]));
+
+      const results = tweets.map((tweet: any) => {
+        const author = userMap.get(tweet.author_id);
+        const handle = author?.username?.toLowerCase() ?? "";
+        const kolId = handleToKolId.get(handle) ?? null;
+        const m = tweet.public_metrics ?? {};
+        return {
+          tweetId: tweet.id as string,
+          authorHandle: author?.username ?? "",
+          authorName: author?.name ?? "",
+          kolId,
+          content: tweet.text as string,
+          postedAt: tweet.created_at ? new Date(tweet.created_at) : null,
+          language: tweet.lang as string,
+          url: `https://x.com/${author?.username ?? "i"}/status/${tweet.id}`,
+          likes: m.like_count ?? 0,
+          retweets: m.retweet_count ?? 0,
+          replies: m.reply_count ?? 0,
+          quotes: m.quote_count ?? 0,
+          impressions: m.impression_count ?? null,
+        };
+      });
+
+      // Apply region filter (post-query, based on KOL region)
+      let filtered = results;
+      if (input.regions && input.regions.length > 0) {
+        const kolRegionMap = new Map(allKols.map(k => [k.id, k.region?.toLowerCase()]));
+        filtered = results.filter(r => {
+          if (!r.kolId) return false;
+          const region = kolRegionMap.get(r.kolId);
+          return region && input.regions!.some(reg => region.includes(reg.toLowerCase()));
+        });
+      }
+
+      return { success: true, results: filtered, query, totalFound: tweets.length };
+    }),
+
+  save: protectedProcedure
+    .input(z.object({
+      name: z.string().min(1).max(256),
+      keywords: z.array(z.string()).min(1),
+      keywordMode: z.enum(["AND", "OR"]).default("OR"),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      kolIds: z.array(z.number()).optional(),
+      languages: z.array(z.string()).optional(),
+      regions: z.array(z.string()).optional(),
+      folderIds: z.array(z.number()).optional(),
+      results: z.array(z.object({
+        tweetId: z.string().optional(),
+        authorHandle: z.string().optional(),
+        authorName: z.string().optional(),
+        kolId: z.number().nullable().optional(),
+        content: z.string().optional(),
+        postedAt: z.date().nullable().optional(),
+        language: z.string().optional(),
+        url: z.string().optional(),
+        likes: z.number().optional(),
+        retweets: z.number().optional(),
+        replies: z.number().optional(),
+        quotes: z.number().optional(),
+        impressions: z.number().nullable().optional(),
+      })),
+    }))
+    .mutation(async ({ input }) => {
+      const { results, ...reportData } = input;
+      const reportId = await createReport({
+        name: reportData.name,
+        keywords: JSON.stringify(reportData.keywords),
+        keywordMode: reportData.keywordMode,
+        startDate: reportData.startDate,
+        endDate: reportData.endDate,
+        kolIds: reportData.kolIds ? JSON.stringify(reportData.kolIds) : null,
+        languages: reportData.languages ? JSON.stringify(reportData.languages) : null,
+        regions: reportData.regions ? JSON.stringify(reportData.regions) : null,
+        folderIds: reportData.folderIds ? JSON.stringify(reportData.folderIds) : null,
+        resultCount: results.length,
+      });
+      await saveReportResults(reportId, results.map(r => ({
+        tweetId: r.tweetId,
+        authorHandle: r.authorHandle,
+        authorName: r.authorName,
+        kolId: r.kolId ?? null,
+        content: r.content,
+        postedAt: r.postedAt ?? null,
+        language: r.language,
+        url: r.url,
+        likes: r.likes ?? 0,
+        retweets: r.retweets ?? 0,
+        replies: r.replies ?? 0,
+        quotes: r.quotes ?? 0,
+        impressions: r.impressions ?? null,
+      })));
+      return { reportId };
+    }),
+
+  exportCsv: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const report = await getReportById(input.id);
+      if (!report) throw new Error("Report not found");
+      const results = await getReportResults(input.id);
+      const headers = ["Tweet ID", "Author Handle", "Author Name", "Content", "Posted At", "Language", "Likes", "Retweets", "Replies", "Quotes", "URL"];
+      const escape = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const rows = results.map(r => [
+        escape(r.tweetId), escape(r.authorHandle), escape(r.authorName),
+        escape(r.content), escape(r.postedAt ? new Date(r.postedAt).toISOString() : ""),
+        escape(r.language), escape(r.likes), escape(r.retweets), escape(r.replies),
+        escape(r.quotes), escape(r.url),
+      ].join(","));
+      return { csv: [headers.join(","), ...rows].join("\n"), filename: `${report.name.replace(/[^a-z0-9]/gi, "_")}.csv` };
+    }),
+});
+
 // ─── App router ───────────────────────────────────────────────────────────────
 
 export const appRouter = router({
@@ -385,6 +623,7 @@ export const appRouter = router({
   }),
   kol: kolRouter,
   folder: folderRouter,
+  report: reportRouter,
 });
 
 export type AppRouter = typeof appRouter;

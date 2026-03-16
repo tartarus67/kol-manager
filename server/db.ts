@@ -3,8 +3,9 @@ import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser, users,
   kols, kolPosts, folders, kolFolders,
-  InsertKol, InsertKolPost, InsertFolder,
-  Kol, KolPost, Folder, KolFolder,
+  reports, reportResults,
+  InsertKol, InsertKolPost, InsertFolder, InsertReport, InsertReportResult,
+  Kol, KolPost, Folder, KolFolder, Report, ReportResult,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -350,4 +351,53 @@ export async function setKolFolders(kolId: number, folderIds: number[]): Promise
   if (folderIds.length > 0) {
     await db.insert(kolFolders).values(folderIds.map(folderId => ({ kolId, folderId })));
   }
+}
+
+// ─── Reports ──────────────────────────────────────────────────────────────────
+
+
+export async function createReport(data: InsertReport): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [result] = await db.insert(reports).values(data).$returningId();
+  return result.id;
+}
+
+export async function listReports(): Promise<Report[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(reports).orderBy(reports.createdAt);
+}
+
+export async function getReportById(id: number): Promise<Report | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(reports).where(eq(reports.id, id)).limit(1);
+  return rows[0];
+}
+
+export async function deleteReport(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(reportResults).where(eq(reportResults.reportId, id));
+  await db.delete(reports).where(eq(reports.id, id));
+}
+
+export async function saveReportResults(reportId: number, results: Omit<InsertReportResult, "reportId">[]): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  if (results.length === 0) return;
+  const rows = results.map(r => ({ ...r, reportId }));
+  // Insert in batches of 100
+  for (let i = 0; i < rows.length; i += 100) {
+    await db.insert(reportResults).values(rows.slice(i, i + 100));
+  }
+  // Update result count
+  await db.update(reports).set({ resultCount: results.length }).where(eq(reports.id, reportId));
+}
+
+export async function getReportResults(reportId: number): Promise<ReportResult[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(reportResults).where(eq(reportResults.reportId, reportId)).orderBy(reportResults.postedAt);
 }

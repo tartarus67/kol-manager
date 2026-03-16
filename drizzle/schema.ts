@@ -186,3 +186,61 @@ export const kolFolders = mysqlTable("kol_folders", {
 
 export type KolFolder = typeof kolFolders.$inferSelect;
 export type InsertKolFolder = typeof kolFolders.$inferInsert;
+
+// ─── Reports ─────────────────────────────────────────────────────────────────────────────
+//
+// A saved report = a named search query + its results snapshot.
+// Keyword mode: 'AND' = all keywords must appear, 'OR' = any keyword matches.
+// Filters are stored as JSON arrays (kolIds, languages, regions, folderIds).
+
+export const reports = mysqlTable("reports", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 256 }).notNull(),
+
+  // Search parameters
+  keywords: text("keywords").notNull(),          // JSON array of keyword strings
+  keywordMode: mysqlEnum("keywordMode", ["AND", "OR"]).default("OR").notNull(),
+  startDate: varchar("startDate", { length: 32 }), // ISO date string
+  endDate: varchar("endDate", { length: 32 }),
+
+  // Filters (stored as JSON arrays)
+  kolIds: text("kolIds"),       // JSON: number[]
+  languages: text("languages"), // JSON: string[]
+  regions: text("regions"),     // JSON: string[]
+  folderIds: text("folderIds"), // JSON: number[]
+
+  resultCount: int("resultCount").default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Report = typeof reports.$inferSelect;
+export type InsertReport = typeof reports.$inferInsert;
+
+export const reportResults = mysqlTable("report_results", {
+  id: int("id").autoincrement().primaryKey(),
+  reportId: int("reportId").notNull(), // FK → reports.id
+
+  // Tweet identity
+  tweetId: varchar("tweetId", { length: 64 }),
+  authorHandle: varchar("authorHandle", { length: 128 }),
+  authorName: varchar("authorName", { length: 256 }),
+  kolId: int("kolId"),  // FK → kols.id if matched
+
+  // Content
+  content: text("content"),
+  postedAt: timestamp("postedAt"),
+  language: varchar("language", { length: 16 }),
+  url: varchar("url", { length: 512 }),
+
+  // Metrics
+  likes: int("likes").default(0),
+  retweets: int("retweets").default(0),
+  replies: int("replies").default(0),
+  quotes: int("quotes").default(0),
+  impressions: bigint("impressions", { mode: "number" }),
+
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ReportResult = typeof reportResults.$inferSelect;
+export type InsertReportResult = typeof reportResults.$inferInsert;

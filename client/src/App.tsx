@@ -8,6 +8,7 @@ import Home from "./pages/Home";
 import KolList from "./pages/KolList";
 import KolDetail from "./pages/KolDetail";
 import Folders from "./pages/Folders";
+import Reports from "./pages/Reports";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -17,6 +18,7 @@ function Router() {
       <Route path="/kols" component={KolList} />
       <Route path="/kols/:id" component={KolDetail} />
       <Route path="/folders" component={Folders} />
+      <Route path="/reports" component={Reports} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

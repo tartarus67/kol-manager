@@ -100,3 +100,22 @@
 ## postLanguage Fix + KOL List Display
 - [ ] Fix: verify enrichment writes postLanguage to DB (check updateKol accepts new fields)
 - [ ] Add postLanguage column to KOL Database table
+
+## Reports Page
+- [ ] DB: reports table (id, name, keywords, keywordMode, startDate, endDate, kolIds, languages, regions, folderIds, createdAt)
+- [ ] DB: report_results table (id, reportId, tweetId, authorHandle, authorName, content, postedAt, likes, retweets, replies, quotes, url)
+- [ ] Server: report.search procedure (X API search with AND/OR keyword logic, date range, KOL/language/region/folder filters)
+- [ ] Server: report.save procedure (save query + results to DB)
+- [ ] Server: report.list procedure
+- [ ] Server: report.getById procedure (with results)
+- [ ] Server: report.delete procedure
+- [ ] Server: report.exportCsv (return CSV string)
+- [ ] Frontend: Reports page with keyword builder (AND/OR chips)
+- [ ] Frontend: Date range picker (start + end)
+- [ ] Frontend: KOL multi-select, language filter, region filter, folder filter
+- [ ] Frontend: Run Search button → results table
+- [ ] Frontend: Save Report modal (name input)
+- [ ] Frontend: Saved Reports list
+- [ ] Frontend: Export CSV button on saved reports
+- [ ] Frontend: Delete saved report
+- [ ] Sidebar nav: Reports link
