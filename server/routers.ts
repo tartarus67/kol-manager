@@ -27,6 +27,7 @@ import {
   setKolFolders,
 } from "./db";
 import { parseCSV } from "./csvIntake";
+import { ENV } from "./_core/env";
 import { InsertKolPost } from "../drizzle/schema";
 
 // ─── Shared input schemas ─────────────────────────────────────────────────────
@@ -228,20 +229,23 @@ const kolRouter = router({
     .mutation(async ({ input }) => {
       const kol = await getKolById(input.id);
       if (!kol) throw new Error("KOL not found");
-      const apiKey = process.env.X_API_BEARER_TOKEN;
-      if (!apiKey) {
+      const rawKey = ENV.xApiBearerToken;
+      console.log('[ENRICH DEBUG] rawKey present:', !!rawKey, '| length:', rawKey?.length, '| process.env key present:', !!process.env.X_API_BEARER_TOKEN);
+      if (!rawKey) {
         return { success: false, reason: "X_API_KEY_MISSING", message: "X API Bearer Token not configured. Add X_API_BEARER_TOKEN to your secrets to enable enrichment." };
       }
+      const apiKey = decodeURIComponent(rawKey);
       return enrichSingleKol(kol.id, kol.handle, apiKey);
     }),
 
   enrichBulk: protectedProcedure
     .input(z.object({ ids: z.array(z.number()).min(1) }))
     .mutation(async ({ input }) => {
-      const apiKey = process.env.X_API_BEARER_TOKEN;
-      if (!apiKey) {
+      const rawKey = ENV.xApiBearerToken;
+      if (!rawKey) {
         return { success: false, reason: "X_API_KEY_MISSING", message: "X API Bearer Token not configured.", enriched: 0, failed: 0 };
       }
+      const apiKey = decodeURIComponent(rawKey);
       let enriched = 0; let failed = 0; const errors: string[] = [];
       for (const id of input.ids) {
         const kol = await getKolById(id);

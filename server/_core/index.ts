@@ -35,6 +35,33 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
+  // Temporary debug endpoint
+  app.get('/api/debug-env', async (_req, res) => {
+    try {
+      const { ENV } = await import('../_core/env');
+      const rawKey = ENV.xApiBearerToken;
+      const apiKey = rawKey ? decodeURIComponent(rawKey) : '';
+      // Test actual X API call
+      let xApiStatus = 0;
+      let xApiOk = false;
+      if (apiKey) {
+        const r = await fetch('https://api.twitter.com/2/users/by/username/twitter?user.fields=public_metrics', {
+          headers: { Authorization: `Bearer ${apiKey}` }
+        });
+        xApiStatus = r.status;
+        xApiOk = r.ok;
+      }
+      res.json({
+        xApiBearerTokenPresent: !!rawKey,
+        xApiBearerTokenLength: rawKey?.length ?? 0,
+        processEnvPresent: !!process.env.X_API_BEARER_TOKEN,
+        xApiCallStatus: xApiStatus,
+        xApiCallOk: xApiOk,
+      });
+    } catch(e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
   // tRPC API
   app.use(
     "/api/trpc",

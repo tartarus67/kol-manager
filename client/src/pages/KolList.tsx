@@ -132,14 +132,20 @@ export default function KolList() {
   const bulkEnrichMutation = trpc.kol.enrichBulk.useMutation({
     onSuccess: (data) => {
       utils.kol.list.invalidate();
-      if (!data.success && data.reason === "X_API_KEY_MISSING") {
+      console.log('[ENRICH RESULT]', JSON.stringify(data));
+      if (!data.success && (data as any).reason === "X_API_KEY_MISSING") {
         toast.error("X API key not configured. Add X_API_BEARER_TOKEN in Secrets.");
+      } else if (data.success) {
+        toast.success(`Enriched ${data.enriched} KOL${data.enriched !== 1 ? 's' : ''}${data.failed ? `, ${data.failed} failed` : ""}`);
       } else {
-        toast.success(`Enriched ${data.enriched} KOLs${data.failed ? `, ${data.failed} failed` : ""}`);
+        toast.error(`Enrichment error: ${(data as any).message || 'Unknown error'}`);
       }
       setSelected(new Set());
     },
-    onError: () => toast.error("Enrichment failed"),
+    onError: (err) => {
+      console.error('[ENRICH ERROR]', err);
+      toast.error(`Enrichment error: ${err.message}`);
+    },
   });
 
   const previewHandlesMutation = trpc.kol.previewHandles.useMutation({

@@ -12,7 +12,7 @@ import {
 import { trpc } from "@/lib/trpc";
 import {
   ArrowLeft, Edit2, ExternalLink, Users, TrendingUp, BarChart2,
-  Star, Tag, MapPin, DollarSign, FileText,
+  Star, Tag, MapPin, DollarSign, FileText, Zap,
 } from "lucide-react";
 import { useState } from "react";
 import { useLocation, useParams } from "wouter";
@@ -31,6 +31,18 @@ export default function KolDetail() {
     { id: kolId },
     { enabled: !isNaN(kolId) }
   );
+
+  const enrichMutation = trpc.kol.enrichKol.useMutation({
+    onSuccess: (data) => {
+      if (data.success) {
+        utils.kol.getById.invalidate({ id: kolId });
+        toast.success("KOL enriched from X API");
+      } else {
+        toast.error((data as any).message || "Enrichment failed");
+      }
+    },
+    onError: (err) => toast.error(`Enrichment error: ${err.message}`),
+  });
 
   const updateMutation = trpc.kol.update.useMutation({
     onSuccess: () => {
@@ -147,6 +159,15 @@ export default function KolDetail() {
             <ArrowLeft className="h-4 w-4" /> Back
           </button>
           <div className="flex-1" />
+          <Button
+            variant="outline"
+            onClick={() => enrichMutation.mutate({ id: kolId })}
+            disabled={enrichMutation.isPending}
+            className="border-primary/40 text-primary hover:bg-primary/10 gap-2"
+          >
+            <Zap className="h-4 w-4" />
+            {enrichMutation.isPending ? "Enriching..." : "Enrich from X"}
+          </Button>
           <Button
             variant="outline"
             onClick={openEdit}
