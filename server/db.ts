@@ -1,6 +1,11 @@
-import { eq, like, or, and, SQL } from "drizzle-orm";
+import { eq, like, or, and, inArray, SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, kols, kolPosts, InsertKol, InsertKolPost, Kol, KolPost } from "../drizzle/schema";
+import {
+  InsertUser, users,
+  kols, kolPosts, folders, kolFolders,
+  InsertKol, InsertKolPost, InsertFolder,
+  Kol, KolPost, Folder, KolFolder,
+} from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -108,70 +113,230 @@ export async function updateKol(id: number, data: Partial<InsertKol>): Promise<v
 export async function deleteKol(id: number): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  // Delete associated posts first
+  await db.delete(kolFolders).where(eq(kolFolders.kolId, id));
   await db.delete(kolPosts).where(eq(kolPosts.kolId, id));
   await db.delete(kols).where(eq(kols.id, id));
 }
 
-export async function bulkImport(
-  kolRows: InsertKol[],
-  postRows: InsertKolPost[]
-): Promise<{ kolsInserted: number; postsInserted: number }> {
+// ─── Bulk KOL operations ─────────────────────────────────────────────────────
+
+export async function bulkDeleteKols(ids: number[]): Promise<{ deleted: number }> {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  if (kolRows.length === 0) return { kolsInserted: 0, postsInserted: 0 };
-
-  // Insert KOLs and collect their IDs
-  const kolIdMap = new Map<string, number>(); // handle → id
-  for (const kol of kolRows) {
-    const result = await db.insert(kols).values(kol);
-    const insertId = (result[0] as any).insertId as number;
-    kolIdMap.set(kol.handle, insertId);
-  }
-
-  // Resolve kolId placeholders in posts
-  let postsInserted = 0;
-  if (postRows.length > 0) {
-    // Posts from campaign trackers have kolId=0 as placeholder
-    // We need to match them by handle — posts carry source info but not handle directly.
-    // The caller is responsible for passing posts with correct kolId already resolved,
-    // OR we resolve here by matching on source+channelName pattern.
-    // For now: posts already have kolId=0 as placeholder; we resolve by order.
-    // Since campaign parsers build kolMap and posts in parallel, we re-resolve by
-    // matching post source to kol handle via the kolIdMap.
-    // Posts don't carry handle — we resolve by inserting in the same order as kols.
-    // Better approach: resolve in the router after parsing.
-    const resolvedPosts = postRows.filter(p => p.kolId > 0);
-    if (resolvedPosts.length > 0) {
-      await db.insert(kolPosts).values(resolvedPosts);
-      postsInserted = resolvedPosts.length;
-    }
-  }
-
-  return { kolsInserted: kolRows.length, postsInserted };
+  if (ids.length === 0) return { deleted: 0 };
+  await db.delete(kolFolders).where(inArray(kolFolders.kolId, ids));
+  await db.delete(kolPosts).where(inArray(kolPosts.kolId, ids));
+  await db.delete(kols).where(inArray(kols.id, ids));
+  return { deleted: ids.length };
 }
+
+export async function bulkUpdateStatus(
+  ids: number[],
+  status: "active" | "inactive" | "pending"
+): Promise<{ updated: number }> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  if (ids.length === 0) return { updated: 0 };
+  await db.update(kols).set({ status }).where(inArray(kols.id, ids));
+  return { updated: ids.length };
+}
+
+// ─── Enrichment helpers ───────────────────────────────────────────────────────
+
+export async function updateKolEnrichment(
+  id: number,
+  data: { enrichmentStatus: "never" | "pending" | "done" | "failed"; enrichedAt?: Date }
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(kols).set(data).where(eq(kols.id, id));
+}
+
+// ─── Handle-only import ───────────────────────────────────────────────────────
+
+export async function importHandles(
+  handles: string[],
+  region?: string
+): Promise<{ inserted: number; skipped: number; skippedHandles: string[]; insertedIds: number[] }> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+
+  // Get existing handles to deduplicate
+  const existing = await db.select({ handle: kols.handle }).from(kols);
+  const existingSet = new Set(existing.map(r => r.handle.toLowerCase()));
+
+  const toInsert = handles.filter(h => !existingSet.has(h.toLowerCase()));
+  const skippedHandles = handles.filter(h => existingSet.has(h.toLowerCase()));
+  const insertedIds: number[] = [];
+
+  for (const handle of toInsert) {
+    const result = await db.insert(kols).values({
+      handle,
+      platform: "X",
+      status: "pending",
+      enrichmentStatus: "never",
+      region: region ?? undefined,
+      source: "handle_import",
+    });
+    insertedIds.push((result[0] as any).insertId as number);
+  }
+
+  return { inserted: toInsert.length, skipped: skippedHandles.length, skippedHandles, insertedIds };
+}
+
+// ─── Bulk import with posts (full CSV import) ─────────────────────────────────
 
 export async function bulkImportWithPosts(
   kolRows: InsertKol[],
   postsByHandle: Map<string, InsertKolPost[]>
-): Promise<{ kolsInserted: number; postsInserted: number }> {
+): Promise<{ kolsInserted: number; kolsSkipped: number; postsInserted: number }> {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  if (kolRows.length === 0) return { kolsInserted: 0, postsInserted: 0 };
+  if (kolRows.length === 0) return { kolsInserted: 0, kolsSkipped: 0, postsInserted: 0 };
 
+  // Fetch all existing handles once to deduplicate across DB
+  const existing = await db.select({ handle: kols.handle, id: kols.id }).from(kols);
+  const existingMap = new Map(existing.map(r => [r.handle.toLowerCase(), r.id]));
+
+  // Deduplicate within the batch itself (keep first occurrence)
+  const seenInBatch = new Set<string>();
+  const dedupedRows: InsertKol[] = [];
+  for (const kol of kolRows) {
+    const key = kol.handle.toLowerCase();
+    if (!seenInBatch.has(key)) {
+      seenInBatch.add(key);
+      dedupedRows.push(kol);
+    }
+  }
+
+  let kolsInserted = 0;
+  let kolsSkipped = 0;
   let postsInserted = 0;
 
-  for (const kol of kolRows) {
-    const result = await db.insert(kols).values(kol);
-    const insertId = (result[0] as any).insertId as number;
+  for (const kol of dedupedRows) {
+    const key = kol.handle.toLowerCase();
+    let kolId: number;
+
+    if (existingMap.has(key)) {
+      // KOL already exists — skip creation, still append posts
+      kolId = existingMap.get(key)!;
+      kolsSkipped++;
+    } else {
+      const result = await db.insert(kols).values(kol);
+      kolId = (result[0] as any).insertId as number;
+      existingMap.set(key, kolId); // track within this batch
+      kolsInserted++;
+    }
 
     const posts = postsByHandle.get(kol.handle) ?? [];
     if (posts.length > 0) {
-      const resolvedPosts = posts.map(p => ({ ...p, kolId: insertId }));
+      const resolvedPosts = posts.map(p => ({ ...p, kolId }));
       await db.insert(kolPosts).values(resolvedPosts);
       postsInserted += resolvedPosts.length;
     }
   }
 
-  return { kolsInserted: kolRows.length, postsInserted };
+  return { kolsInserted, kolsSkipped, postsInserted };
+}
+
+// ─── Folder helpers ───────────────────────────────────────────────────────────
+
+export async function listFolders(): Promise<(Folder & { kolCount: number })[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const allFolders = await db.select().from(folders).orderBy(folders.createdAt);
+  const allKolFolders = await db.select().from(kolFolders);
+
+  const countMap = new Map<number, number>();
+  for (const kf of allKolFolders) {
+    countMap.set(kf.folderId, (countMap.get(kf.folderId) ?? 0) + 1);
+  }
+
+  return allFolders.map(f => ({ ...f, kolCount: countMap.get(f.id) ?? 0 }));
+}
+
+export async function getFolderById(id: number): Promise<Folder | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(folders).where(eq(folders.id, id)).limit(1);
+  return result[0];
+}
+
+export async function createFolder(data: InsertFolder): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const result = await db.insert(folders).values(data);
+  return (result[0] as any).insertId as number;
+}
+
+export async function updateFolder(id: number, data: Partial<InsertFolder>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(folders).set(data).where(eq(folders.id, id));
+}
+
+export async function deleteFolder(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(kolFolders).where(eq(kolFolders.folderId, id));
+  await db.delete(folders).where(eq(folders.id, id));
+}
+
+// ─── KOL-Folder assignment ────────────────────────────────────────────────────
+
+export async function getKolsInFolder(folderId: number): Promise<Kol[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const assignments = await db.select().from(kolFolders).where(eq(kolFolders.folderId, folderId));
+  if (assignments.length === 0) return [];
+  const kolIds = assignments.map(a => a.kolId);
+  return db.select().from(kols).where(inArray(kols.id, kolIds)).orderBy(kols.createdAt);
+}
+
+export async function getFoldersForKol(kolId: number): Promise<Folder[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const assignments = await db.select().from(kolFolders).where(eq(kolFolders.kolId, kolId));
+  if (assignments.length === 0) return [];
+  const folderIds = assignments.map(a => a.folderId);
+  return db.select().from(folders).where(inArray(folders.id, folderIds)).orderBy(folders.name);
+}
+
+export async function addKolsToFolder(kolIds: number[], folderId: number): Promise<{ added: number }> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  if (kolIds.length === 0) return { added: 0 };
+
+  // Get existing assignments to avoid duplicates
+  const existing = await db.select().from(kolFolders).where(
+    and(eq(kolFolders.folderId, folderId), inArray(kolFolders.kolId, kolIds))
+  );
+  const existingKolIds = new Set(existing.map(e => e.kolId));
+  const toAdd = kolIds.filter(id => !existingKolIds.has(id));
+
+  if (toAdd.length > 0) {
+    await db.insert(kolFolders).values(toAdd.map(kolId => ({ kolId, folderId })));
+  }
+  return { added: toAdd.length };
+}
+
+export async function removeKolsFromFolder(kolIds: number[], folderId: number): Promise<{ removed: number }> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  if (kolIds.length === 0) return { removed: 0 };
+  await db.delete(kolFolders).where(
+    and(eq(kolFolders.folderId, folderId), inArray(kolFolders.kolId, kolIds))
+  );
+  return { removed: kolIds.length };
+}
+
+export async function setKolFolders(kolId: number, folderIds: number[]): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  // Remove all existing folder assignments for this KOL
+  await db.delete(kolFolders).where(eq(kolFolders.kolId, kolId));
+  // Re-add the new set
+  if (folderIds.length > 0) {
+    await db.insert(kolFolders).values(folderIds.map(folderId => ({ kolId, folderId })));
+  }
 }

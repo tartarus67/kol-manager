@@ -74,6 +74,8 @@ export const kols = mysqlTable("kols", {
 
   // Admin
   status: mysqlEnum("status", ["active", "inactive", "pending"]).default("active").notNull(),
+  enrichmentStatus: mysqlEnum("enrichmentStatus", ["never", "pending", "done", "failed"]).default("never").notNull(),
+  enrichedAt: timestamp("enrichedAt"),
   source: varchar("source", { length: 128 }),  // Which sheet/import batch this came from
   notes: text("notes"),
 
@@ -147,3 +149,30 @@ export const kolPosts = mysqlTable("kol_posts", {
 
 export type KolPost = typeof kolPosts.$inferSelect;
 export type InsertKolPost = typeof kolPosts.$inferInsert;
+
+// ─── Folders ─────────────────────────────────────────────────────────────────
+//
+// Folders are organizational groups (e.g. "Agency A", "Internal Aethir KOLs").
+// KOLs can belong to multiple folders (many-to-many via kol_folders).
+
+export const folders = mysqlTable("folders", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 128 }).notNull(),
+  description: text("description"),
+  color: varchar("color", { length: 32 }).default("#D8FE51"),  // Aethir green default
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Folder = typeof folders.$inferSelect;
+export type InsertFolder = typeof folders.$inferInsert;
+
+export const kolFolders = mysqlTable("kol_folders", {
+  id: int("id").autoincrement().primaryKey(),
+  kolId: int("kolId").notNull(),      // FK → kols.id
+  folderId: int("folderId").notNull(), // FK → folders.id
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type KolFolder = typeof kolFolders.$inferSelect;
+export type InsertKolFolder = typeof kolFolders.$inferInsert;

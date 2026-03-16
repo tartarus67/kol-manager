@@ -1,0 +1,9 @@
+{
+  "query": "ALTER TABLE kols ADD COLUMN enrichmentStatus ENUM('never','pending','done','failed') NOT NULL DEFAULT 'never' AFTER status; ALTER TABLE kols ADD COLUMN enrichedAt TIMESTAMP NULL AFTER enrichmentStatus;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user s8wnVbZA4yzfrg7.8ebc791ac56d --database DZjTmaPHn9nCzaD9AuvmrW --execute ALTER TABLE kols ADD COLUMN enrichmentStatus ENUM('never','pending','done','failed') NOT NULL DEFAULT 'never' AFTER status; ALTER TABLE kols ADD COLUMN enrichedAt TIMESTAMP NULL AFTER enrichmentStatus;",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1633
+}
