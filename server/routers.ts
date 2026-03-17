@@ -288,29 +288,26 @@ const kolRouter = router({
         for (const post of toFetch) {
           try {
             let tweet: any = null;
-            if (post.kolHandle) {
-              const sinceId = String(Number(post.tweetId!) - 1);
-              const q = encodeURIComponent(`from:${post.kolHandle} since_id:${sinceId} max_id:${post.tweetId}`);
-              const res = await fetchWithRetry(
-                `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${q}&queryType=Latest&count=1`,
-                { headers: { "X-API-Key": apiKey } }
-              );
-              if (res.ok) {
-                const json = await res.json() as any;
-                tweet = json?.tweets?.find((t: any) => String(t.id) === String(post.tweetId))
-                  ?? (json?.tweets?.length === 1 ? json.tweets[0] : null);
-              }
+            // Primary: direct tweet lookup by ID
+            const er1 = await fetchWithRetry(
+              `https://api.twitterapi.io/twitter/tweets?tweet_ids=${post.tweetId}`,
+              { headers: { "X-API-Key": apiKey } }
+            );
+            if (er1.ok) {
+              const ej1 = await er1.json() as any;
+              const ets = Array.isArray(ej1) ? ej1 : (ej1?.tweets ?? []);
+              tweet = ets.find((t: any) => String(t.id) === String(post.tweetId)) ?? ets[0] ?? null;
             }
+            // Fallback: url search
             if (!tweet) {
-              const q2 = encodeURIComponent(`url:${post.tweetId}`);
-              const res2 = await fetchWithRetry(
-                `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${q2}&queryType=Latest&count=1`,
+              const eq2 = encodeURIComponent(`url:twitter.com/i/web/status/${post.tweetId}`);
+              const er2 = await fetchWithRetry(
+                `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${eq2}&queryType=Latest&count=5`,
                 { headers: { "X-API-Key": apiKey } }
               );
-              if (res2.ok) {
-                const j2 = await res2.json() as any;
-                tweet = j2?.tweets?.find((t: any) => String(t.id) === String(post.tweetId))
-                  ?? (j2?.tweets?.length > 0 ? j2.tweets[0] : null);
+              if (er2.ok) {
+                const ej2 = await er2.json() as any;
+                tweet = (ej2?.tweets ?? []).find((t: any) => String(t.id) === String(post.tweetId)) ?? null;
               }
             }
             if (tweet) {
@@ -824,37 +821,44 @@ const campaignRouter = router({
 
       for (const post of toFetch) {
         try {
-          // Best approach: search from:handle with since_id/max_id bracket
-          // Fallback: search by tweet ID in URL
           let tweet: any = null;
 
-          if (post.kolHandle) {
-            // Primary: search from:handle filtered to exact tweet ID range
-            // Subtract 1 from tweet ID string for since_id bracket
-            const sinceId = String(Number(post.tweetId!) - 1);
-            const q = encodeURIComponent(`from:${post.kolHandle} since_id:${sinceId} max_id:${post.tweetId}`);
-            const res = await fetchWithRetry(
-              `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${q}&queryType=Latest&count=1`,
+          // Primary: direct tweet lookup by ID (most reliable)
+          const r1 = await fetchWithRetry(
+            `https://api.twitterapi.io/twitter/tweets?tweet_ids=${post.tweetId}`,
+            { headers: { "X-API-Key": apiKey } }
+          );
+          if (r1.ok) {
+            const j1 = await r1.json() as any;
+            // Response is { tweets: [...] } or array directly
+            const tweets = Array.isArray(j1) ? j1 : (j1?.tweets ?? []);
+            tweet = tweets.find((t: any) => String(t.id) === String(post.tweetId)) ?? tweets[0] ?? null;
+          }
+
+          // Fallback: advanced_search with exact tweet ID in url filter
+          if (!tweet) {
+            const q2 = encodeURIComponent(`url:twitter.com/i/web/status/${post.tweetId}`);
+            const r2 = await fetchWithRetry(
+              `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${q2}&queryType=Latest&count=5`,
               { headers: { "X-API-Key": apiKey } }
             );
-            if (res.ok) {
-              const json = await res.json() as any;
-              tweet = json?.tweets?.find((t: any) => String(t.id) === String(post.tweetId))
-                ?? (json?.tweets?.length === 1 ? json.tweets[0] : null);
+            if (r2.ok) {
+              const j2 = await r2.json() as any;
+              const tweets2 = j2?.tweets ?? [];
+              tweet = tweets2.find((t: any) => String(t.id) === String(post.tweetId)) ?? null;
             }
           }
 
-          // Fallback: search by URL containing the tweet ID
-          if (!tweet) {
-            const q2 = encodeURIComponent(`url:${post.tweetId}`);
-            const res2 = await fetchWithRetry(
-              `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${q2}&queryType=Latest&count=1`,
+          // Last resort: search from:handle, verify by ID
+          if (!tweet && post.kolHandle) {
+            const q3 = encodeURIComponent(`from:${post.kolHandle}`);
+            const r3 = await fetchWithRetry(
+              `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${q3}&queryType=Latest&count=20`,
               { headers: { "X-API-Key": apiKey } }
             );
-            if (res2.ok) {
-              const j2 = await res2.json() as any;
-              tweet = j2?.tweets?.find((t: any) => String(t.id) === String(post.tweetId))
-                ?? (j2?.tweets?.length > 0 ? j2.tweets[0] : null);
+            if (r3.ok) {
+              const j3 = await r3.json() as any;
+              tweet = (j3?.tweets ?? []).find((t: any) => String(t.id) === String(post.tweetId)) ?? null;
             }
           }
 
