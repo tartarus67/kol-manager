@@ -9,6 +9,7 @@ function getEnv() {
     forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
     forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
     xApiBearerToken: process.env.X_API_BEARER_TOKEN ?? "",
+    twitterApiIoKey: process.env.twitterapi_io_key ?? "",
   };
 }
 

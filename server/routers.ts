@@ -408,11 +408,10 @@ const reportRouter = router({
       maxResults: z.number().min(10).max(100).default(50),
     }))
     .mutation(async ({ input }) => {
-      const rawKey = ENV.xApiBearerToken;
-      if (!rawKey) {
-        return { success: false, reason: "X_API_KEY_MISSING", message: "X API Bearer Token not configured.", results: [] };
+      const apiKey = ENV.twitterApiIoKey;
+      if (!apiKey) {
+        return { success: false, reason: "TWITTERAPI_IO_KEY_MISSING", message: "twitterapi.io API key not configured. Add twitterapi_io_key to your secrets.", results: [] };
       }
-      const bearerToken = decodeURIComponent(rawKey);
 
       // Resolve KOL handles from folderIds if provided
       let targetHandles: string[] = [];
@@ -435,15 +434,12 @@ const reportRouter = router({
           .filter((h): h is string => !!h);
       }
 
-      // Build X API search query
-      // AND mode: all keywords must appear
-      // OR mode: any keyword matches
+      // Build search query (same Twitter advanced search syntax)
       let queryParts: string[] = [];
 
       if (input.keywordMode === "AND") {
         queryParts = input.keywords.map(k => k.includes(" ") ? `"${k}"` : k);
       } else {
-        // OR: wrap in parentheses with OR
         const orPart = input.keywords.map(k => k.includes(" ") ? `"${k}"` : k).join(" OR ");
         queryParts = [`(${orPart})`];
       }
@@ -459,79 +455,92 @@ const reportRouter = router({
         queryParts.push(`lang:${input.languages[0]}`);
       }
 
+      // Add date range (twitterapi.io uses since: / until: in query string)
+      if (input.startDate) {
+        const d = new Date(input.startDate);
+        const since = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}_00:00:00_UTC`;
+        queryParts.push(`since:${since}`);
+      }
+      if (input.endDate) {
+        const d = new Date(input.endDate);
+        const until = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}_23:59:59_UTC`;
+        queryParts.push(`until:${until}`);
+      }
+
       // Exclude retweets
       queryParts.push("-is:retweet");
 
       const query = queryParts.join(" ");
 
-      // Build date range params
-      const params = new URLSearchParams({
-        query,
-        max_results: String(Math.min(input.maxResults, 100)),
-        "tweet.fields": "created_at,public_metrics,lang,author_id",
-        "expansions": "author_id",
-        "user.fields": "username,name,profile_image_url",
-      });
-      if (input.startDate) params.set("start_time", new Date(input.startDate).toISOString());
-      if (input.endDate) {
-        const end = new Date(input.endDate);
-        end.setHours(23, 59, 59, 999);
-        params.set("end_time", end.toISOString());
-      }
-
-      const url = `https://api.twitter.com/2/tweets/search/recent?${params.toString()}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${bearerToken}` } });
-
-      if (!res.ok) {
-        const body = await res.text();
-        return { success: false, reason: `X_API_ERROR_${res.status}`, message: `X API error: ${body.slice(0, 300)}`, results: [] };
-      }
-
-      const json = await res.json() as any;
-      const tweets: any[] = json?.data ?? [];
-      const users: any[] = json?.includes?.users ?? [];
-      const userMap = new Map(users.map((u: any) => [u.id, u]));
-
-      // Match tweets to KOLs in our DB
+      // Paginate twitterapi.io to collect up to maxResults tweets
       const allKols = await listKols();
       const handleToKolId = new Map(allKols.map(k => [k.handle.toLowerCase(), k.id]));
 
-      const results = tweets.map((tweet: any) => {
-        const author = userMap.get(tweet.author_id);
-        const handle = author?.username?.toLowerCase() ?? "";
-        const kolId = handleToKolId.get(handle) ?? null;
-        const m = tweet.public_metrics ?? {};
-        return {
-          tweetId: tweet.id as string,
-          authorHandle: author?.username ?? "",
-          authorName: author?.name ?? "",
-          kolId,
-          content: tweet.text as string,
-          postedAt: tweet.created_at ? new Date(tweet.created_at) : null,
-          language: tweet.lang as string,
-          url: `https://x.com/${author?.username ?? "i"}/status/${tweet.id}`,
-          likes: m.like_count ?? 0,
-          retweets: m.retweet_count ?? 0,
-          replies: m.reply_count ?? 0,
-          quotes: m.quote_count ?? 0,
-          impressions: m.impression_count ?? null,
-          views: m.impression_count ?? null,
-          bookmarks: m.bookmark_count ?? null,
-        };
-      });
+      const collected: any[] = [];
+      let cursor = "";
+      const maxToFetch = Math.min(input.maxResults, 100);
+
+      while (collected.length < maxToFetch) {
+        const params = new URLSearchParams({ query, queryType: "Latest" });
+        if (cursor) params.set("cursor", cursor);
+
+        const res = await fetch(
+          `https://api.twitterapi.io/twitter/tweet/advanced_search?${params.toString()}`,
+          { headers: { "X-API-Key": apiKey } }
+        );
+
+        if (!res.ok) {
+          const body = await res.text();
+          if (collected.length === 0) {
+            return { success: false, reason: `TWITTERAPI_IO_ERROR_${res.status}`, message: `twitterapi.io error: ${body.slice(0, 300)}`, results: [] };
+          }
+          break; // partial results — stop paginating
+        }
+
+        const json = await res.json() as any;
+        const tweets: any[] = json?.tweets ?? [];
+        if (tweets.length === 0) break;
+
+        for (const tweet of tweets) {
+          if (collected.length >= maxToFetch) break;
+          const author = tweet.author ?? {};
+          const handle = (author.userName ?? "").toLowerCase();
+          const kolId = handleToKolId.get(handle) ?? null;
+          collected.push({
+            tweetId: tweet.id as string,
+            authorHandle: author.userName ?? "",
+            authorName: author.name ?? "",
+            kolId,
+            content: tweet.text as string,
+            postedAt: tweet.createdAt ? new Date(tweet.createdAt) : null,
+            language: tweet.lang as string,
+            url: tweet.url ?? `https://x.com/${author.userName ?? "i"}/status/${tweet.id}`,
+            likes: tweet.likeCount ?? 0,
+            retweets: tweet.retweetCount ?? 0,
+            replies: tweet.replyCount ?? 0,
+            quotes: tweet.quoteCount ?? 0,
+            impressions: tweet.viewCount ?? null,
+            views: tweet.viewCount ?? null,
+            bookmarks: tweet.bookmarkCount ?? null,
+          });
+        }
+
+        if (!json.has_next_page || !json.next_cursor) break;
+        cursor = json.next_cursor;
+      }
 
       // Apply region filter (post-query, based on KOL region)
-      let filtered = results;
+      let filtered = collected;
       if (input.regions && input.regions.length > 0) {
         const kolRegionMap = new Map(allKols.map(k => [k.id, k.region?.toLowerCase()]));
-        filtered = results.filter(r => {
+        filtered = collected.filter(r => {
           if (!r.kolId) return false;
           const region = kolRegionMap.get(r.kolId);
           return region && input.regions!.some(reg => region.includes(reg.toLowerCase()));
         });
       }
 
-      return { success: true, results: filtered, query, totalFound: tweets.length };
+      return { success: true, results: filtered, query, totalFound: collected.length };
     }),
 
   save: protectedProcedure
