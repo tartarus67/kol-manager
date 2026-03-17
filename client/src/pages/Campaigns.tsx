@@ -288,6 +288,8 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
   const importMutation = trpc.campaign.importUrls.useMutation({
     onSuccess: (res) => {
       utils.campaign.getById.invalidate({ id });
+      // Invalidate all KOL profiles so their metrics auto-refresh
+      utils.kol.getById.invalidate();
       setImportOpen(false);
       setImportText(""); setImportBudget("");
       toast.success(`Imported ${res.inserted} post${res.inserted !== 1 ? "s" : ""}`);
@@ -307,6 +309,9 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
   const fetchMetricsMutation = trpc.campaign.fetchMetrics.useMutation({
     onSuccess: (res) => {
       utils.campaign.getById.invalidate({ id });
+      // Invalidate all KOL profiles so their top-line metrics auto-refresh
+      utils.kol.getById.invalidate();
+      utils.kol.list.invalidate();
       toast.success(`Fetched metrics: ${res.done} done, ${res.failed} failed`);
     },
     onError: (e) => toast.error(e.message),
@@ -319,6 +324,7 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
   const updatePostMutation = trpc.campaign.updatePost.useMutation({
     onSuccess: () => {
       utils.campaign.getById.invalidate({ id });
+      utils.kol.getById.invalidate();
       setEditPostId(null);
       toast.success("Post budget updated");
     },
@@ -329,6 +335,8 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
   const deletePostMutation = trpc.campaign.deletePost.useMutation({
     onSuccess: () => {
       utils.campaign.getById.invalidate({ id });
+      utils.kol.getById.invalidate();
+      utils.kol.list.invalidate();
       toast.success("Post removed");
     },
     onError: (e) => toast.error(e.message),
