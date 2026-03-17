@@ -559,15 +559,20 @@ export async function recalcKolMetrics(kolId: number): Promise<void> {
   const avgRetweets = avg(posts.map(p => p.retweets));
   const avgReplies = avg(posts.map(p => p.replies));
   const avgImpressions = avg(posts.map(p => p.views));
+  // Avg engagement = likes + RT + replies + QT + saves per post
   const avgEngagement = avg(posts.map(p =>
-    (p.likes ?? 0) + (p.retweets ?? 0) + (p.replies ?? 0) + (p.quotes ?? 0)
+    (p.likes ?? 0) + (p.retweets ?? 0) + (p.replies ?? 0) + (p.quotes ?? 0) + (p.bookmarks ?? 0)
   ));
 
-  // Engagement rate = avgEngagement / avgImpressions (if views available), else null
-  const engagementRate =
-    avgEngagement != null && avgImpressions != null && avgImpressions > 0
-      ? avgEngagement / avgImpressions
-      : null;
+  // Engagement rate = (likes + RT + replies + QT + saves) / views × 100 (as percentage)
+  const engagementRate = avg(
+    posts
+      .filter(p => p.views != null && p.views > 0)
+      .map(p => {
+        const interactions = (p.likes ?? 0) + (p.retweets ?? 0) + (p.replies ?? 0) + (p.quotes ?? 0) + (p.bookmarks ?? 0);
+        return (interactions / p.views!) * 100;
+      })
+  );
 
   const setData: any = {};
   if (avgLikes != null) setData.avgLikes = avgLikes;

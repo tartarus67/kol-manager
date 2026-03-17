@@ -158,3 +158,8 @@
 - [ ] Server: after campaign fetchMetrics, return list of unknown handles
 - [ ] UI: "Missing KOLs" popup after report search — shows unknown handles, lets user create profiles, assign folders and campaigns
 - [ ] UI: KOL profile metrics (avgViews, avgLikes, avgRetweets, avgReplies, engagementRate) auto-update from campaign posts
+
+## KOL Profile Metrics Fix
+- [x] Remove Smart Followers card from KOL profile top metrics
+- [x] Fix engagement rate formula: (likes+RT+replies+QT+saves)/views×100
+- [x] Recalculate all avg metrics from campaign posts using correct formula

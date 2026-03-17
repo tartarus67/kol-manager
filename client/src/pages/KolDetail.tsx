@@ -234,17 +234,21 @@ export default function KolDetail() {
           </div>
         </div>
 
-        {/* Metrics Grid */}
+        {/* Metrics Grid — row 1: Followers + engagement rate + avg per-post metrics */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <MetricCard icon={<Users className="h-4 w-4" />} label="Followers" value={fmt(kol.followers)} />
-          <MetricCard icon={<Users className="h-4 w-4" />} label="Smart Followers" value={fmt(kol.smartFollowers)} />
-          <MetricCard icon={<TrendingUp className="h-4 w-4" />} label="Eng. Rate" value={kol.engagementRate != null ? `${Number(kol.engagementRate).toFixed(2)}%` : "—"} highlight />
+          <MetricCard
+            icon={<TrendingUp className="h-4 w-4" />}
+            label="Eng. Rate"
+            value={kol.engagementRate != null ? `${Number(kol.engagementRate).toFixed(2)}%` : "—"}
+            highlight
+          />
           <MetricCard icon={<Heart className="h-4 w-4" />} label="Avg Likes" value={(kol as any).avgLikes != null ? fmt(Math.round((kol as any).avgLikes)) : "—"} />
           <MetricCard icon={<Repeat2 className="h-4 w-4" />} label="Avg Retweets" value={(kol as any).avgRetweets != null ? fmt(Math.round((kol as any).avgRetweets)) : "—"} />
           <MetricCard icon={<MessageCircle className="h-4 w-4" />} label="Avg Replies" value={(kol as any).avgReplies != null ? fmt(Math.round((kol as any).avgReplies)) : "—"} />
+          <MetricCard icon={<BarChart2 className="h-4 w-4" />} label="Avg Engagement" value={fmt(kol.avgEngagement)} />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          <MetricCard icon={<BarChart2 className="h-4 w-4" />} label="Avg Engagement" value={fmt(kol.avgEngagement)} />
           <MetricCard icon={<BarChart2 className="h-4 w-4" />} label="Avg Impressions" value={fmt(kol.avgImpressions)} />
           <MetricCard icon={<Star className="h-4 w-4" />} label="Score" value={kol.score != null ? Number(kol.score).toFixed(2) : "—"} />
         </div>
