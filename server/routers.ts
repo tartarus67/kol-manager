@@ -278,9 +278,13 @@ const kolRouter = router({
         return { success: false, reason: "TWITTERAPI_IO_KEY_MISSING", message: "twitterapi.io API key not configured.", enriched: 0, failed: 0 };
       }
       let enriched = 0; let failed = 0; const errors: string[] = [];
-      for (const id of input.ids) {
+      const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+      for (let i = 0; i < input.ids.length; i++) {
+        const id = input.ids[i];
         const kol = await getKolById(id);
         if (!kol) continue;
+        // Respect twitterapi.io free-tier QPS: 1 req/5s. Add delay between KOLs.
+        if (i > 0) await sleep(5500);
         try {
           await updateKolEnrichment(id, { enrichmentStatus: "pending" });
           const result = await enrichSingleKol(id, kol.handle, apiKey);
@@ -658,6 +662,22 @@ export type AppRouter = typeof appRouter;
 
 // ─── twitterapi.io enrichment helper ─────────────────────────────────────────
 
+/** Fetch with automatic retry on 429 (up to 3 attempts, 6s backoff) */
+async function fetchWithRetry(url: string, options: RequestInit, retries = 3): Promise<Response> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const res = await fetch(url, options);
+    if (res.status !== 429) return res;
+    if (attempt < retries - 1) {
+      // Retry-After header or default 6s
+      const retryAfter = parseInt(res.headers.get("Retry-After") ?? "6", 10);
+      await new Promise(r => setTimeout(r, (retryAfter + 1) * 1000));
+    } else {
+      return res; // return the 429 on final attempt
+    }
+  }
+  throw new Error("fetchWithRetry: exhausted retries");
+}
+
 async function enrichSingleKol(
   id: number,
   handle: string,
@@ -668,7 +688,7 @@ async function enrichSingleKol(
 
     // 1. Fetch user profile via twitterapi.io
     const userUrl = `https://api.twitterapi.io/twitter/user/info?userName=${encodeURIComponent(handle)}`;
-    const userRes = await fetch(userUrl, { headers: { "X-API-Key": apiKey } });
+    const userRes = await fetchWithRetry(userUrl, { headers: { "X-API-Key": apiKey } });
     if (!userRes.ok) {
       const body = await userRes.text();
       await updateKolEnrichment(id, { enrichmentStatus: "failed" });
@@ -688,7 +708,7 @@ async function enrichSingleKol(
     try {
       const aethirQuery = `from:${handle} @AethirCloud -is:retweet`;
       const searchParams = new URLSearchParams({ query: aethirQuery, queryType: "Latest" });
-      const searchRes = await fetch(
+      const searchRes = await fetchWithRetry(
         `https://api.twitterapi.io/twitter/tweet/advanced_search?${searchParams.toString()}`,
         { headers: { "X-API-Key": apiKey } }
       );
@@ -701,7 +721,7 @@ async function enrichSingleKol(
     if (tweets.length === 0) {
       try {
         const tlParams = new URLSearchParams({ userName: handle });
-        const tlRes = await fetch(
+        const tlRes = await fetchWithRetry(
           `https://api.twitterapi.io/twitter/user/last_tweets?${tlParams.toString()}`,
           { headers: { "X-API-Key": apiKey } }
         );
