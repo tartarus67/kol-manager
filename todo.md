@@ -121,7 +121,16 @@
 - [ ] Sidebar nav: Reports link
 
 ## Reports UI Improvements
-- [ ] Smart keyword input: single bar, auto-detect AND/OR from natural language
-- [ ] Calendar date picker (dropdown) for start and end dates
-- [ ] Add Views, QT (quotes), Saves/Bookmarks columns to results table
-- [ ] Server: return views, quotes, bookmarks from X API search results
+- [x] Smart keyword input: single bar, auto-detect AND/OR from natural language
+- [x] Calendar date picker (dropdown) for start and end dates
+- [x] Add Views, QT (quotes), Saves/Bookmarks columns to results table
+- [x] Server: return views, quotes, bookmarks from X API search results
+- [x] Switch search backend to twitterapi.io (viewCount + bookmarkCount native, full history)
+
+## twitterapi.io Migration & Cost Tracker
+- [x] Remove max results hard cap (allow full pagination, thousands of results)
+- [x] Migrate KOL enrichment (user lookup + timeline) from X Basic API to twitterapi.io
+- [x] Remove all api.twitter.com calls from backend
+- [x] Add api_usage DB table to log credits consumed per operation
+- [x] Server: log credits after each twitterapi.io call (search, enrich)
+- [x] UI: Cost tracker widget on Dashboard showing total spend + breakdown

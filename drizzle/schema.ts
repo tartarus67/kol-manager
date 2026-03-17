@@ -246,3 +246,22 @@ export const reportResults = mysqlTable("report_results", {
 
 export type ReportResult = typeof reportResults.$inferSelect;
 export type InsertReportResult = typeof reportResults.$inferInsert;
+
+// ─── API Usage / Cost Tracker ────────────────────────────────────────────────
+export const apiUsage = mysqlTable("api_usage", {
+  id: int("id").autoincrement().primaryKey(),
+  // operation: "search" | "enrich_profile" | "enrich_timeline"
+  operation: varchar("operation", { length: 64 }).notNull(),
+  // credits consumed (15 per tweet, 18 per profile)
+  credits: int("credits").notNull().default(0),
+  // number of items returned (tweets or profiles)
+  itemCount: int("itemCount").notNull().default(0),
+  // optional context (report name, KOL handle, etc.)
+  context: varchar("context", { length: 256 }),
+  // USD cost: credits / 100000
+  costUsd: decimal("costUsd", { precision: 10, scale: 6 }).notNull().default("0"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ApiUsage = typeof apiUsage.$inferSelect;
+export type InsertApiUsage = typeof apiUsage.$inferInsert;

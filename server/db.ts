@@ -3,9 +3,9 @@ import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser, users,
   kols, kolPosts, folders, kolFolders,
-  reports, reportResults,
+  reports, reportResults, apiUsage,
   InsertKol, InsertKolPost, InsertFolder, InsertReport, InsertReportResult,
-  Kol, KolPost, Folder, KolFolder, Report, ReportResult,
+  Kol, KolPost, Folder, KolFolder, Report, ReportResult, ApiUsage,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -400,4 +400,61 @@ export async function getReportResults(reportId: number): Promise<ReportResult[]
   const db = await getDb();
   if (!db) return [];
   return db.select().from(reportResults).where(eq(reportResults.reportId, reportId)).orderBy(reportResults.postedAt);
+}
+
+// ─── API Usage / Cost Tracker ─────────────────────────────────────────────────
+
+export async function logApiUsage(params: {
+  operation: string;
+  itemCount: number;
+  context?: string;
+}): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  // twitterapi.io pricing: 15 credits/tweet, 18 credits/profile, 1 USD = 100,000 credits
+  const creditsPerItem = params.operation === "enrich_profile" ? 18 : 15;
+  const credits = params.itemCount * creditsPerItem;
+  const costUsd = (credits / 100000).toFixed(6);
+  try {
+    await db.insert(apiUsage).values({
+      operation: params.operation,
+      credits,
+      itemCount: params.itemCount,
+      context: params.context,
+      costUsd,
+    });
+  } catch (_) {
+    // non-critical — don't fail the main operation
+  }
+}
+
+export async function getApiUsageStats(): Promise<{
+  totalCredits: number;
+  totalCostUsd: number;
+  byOperation: { operation: string; credits: number; costUsd: number; itemCount: number; calls: number }[];
+  recentUsage: ApiUsage[];
+}> {
+  const db = await getDb();
+  if (!db) return { totalCredits: 0, totalCostUsd: 0, byOperation: [], recentUsage: [] };
+
+  const rows = await db.select().from(apiUsage).orderBy(apiUsage.createdAt);
+
+  const totalCredits = rows.reduce((s, r) => s + r.credits, 0);
+  const totalCostUsd = rows.reduce((s, r) => s + parseFloat(r.costUsd as string), 0);
+
+  const opMap = new Map<string, { credits: number; costUsd: number; itemCount: number; calls: number }>();
+  for (const r of rows) {
+    const existing = opMap.get(r.operation) ?? { credits: 0, costUsd: 0, itemCount: 0, calls: 0 };
+    opMap.set(r.operation, {
+      credits: existing.credits + r.credits,
+      costUsd: existing.costUsd + parseFloat(r.costUsd as string),
+      itemCount: existing.itemCount + r.itemCount,
+      calls: existing.calls + 1,
+    });
+  }
+
+  const byOperation = Array.from(opMap.entries()).map(([operation, stats]) => ({ operation, ...stats }));
+  const recentUsage = rows.slice(-20).reverse();
+
+  return { totalCredits, totalCostUsd, byOperation, recentUsage };
 }

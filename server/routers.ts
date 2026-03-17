@@ -32,6 +32,8 @@ import {
   deleteReport,
   saveReportResults,
   getReportResults,
+  logApiUsage,
+  getApiUsageStats,
 } from "./db";
 import { parseCSV } from "./csvIntake";
 import { ENV } from "./_core/env";
@@ -261,23 +263,20 @@ const kolRouter = router({
     .mutation(async ({ input }) => {
       const kol = await getKolById(input.id);
       if (!kol) throw new Error("KOL not found");
-      const rawKey = ENV.xApiBearerToken;
-      console.log('[ENRICH DEBUG] rawKey present:', !!rawKey, '| length:', rawKey?.length, '| process.env key present:', !!process.env.X_API_BEARER_TOKEN);
-      if (!rawKey) {
-        return { success: false, reason: "X_API_KEY_MISSING", message: "X API Bearer Token not configured. Add X_API_BEARER_TOKEN to your secrets to enable enrichment." };
+      const apiKey = ENV.twitterApiIoKey;
+      if (!apiKey) {
+        return { success: false, reason: "TWITTERAPI_IO_KEY_MISSING", message: "twitterapi.io API key not configured. Add twitterapi_io_key to your secrets to enable enrichment." };
       }
-      const apiKey = decodeURIComponent(rawKey);
       return enrichSingleKol(kol.id, kol.handle, apiKey);
     }),
 
   enrichBulk: protectedProcedure
     .input(z.object({ ids: z.array(z.number()).min(1) }))
     .mutation(async ({ input }) => {
-      const rawKey = ENV.xApiBearerToken;
-      if (!rawKey) {
-        return { success: false, reason: "X_API_KEY_MISSING", message: "X API Bearer Token not configured.", enriched: 0, failed: 0 };
+      const apiKey = ENV.twitterApiIoKey;
+      if (!apiKey) {
+        return { success: false, reason: "TWITTERAPI_IO_KEY_MISSING", message: "twitterapi.io API key not configured.", enriched: 0, failed: 0 };
       }
-      const apiKey = decodeURIComponent(rawKey);
       let enriched = 0; let failed = 0; const errors: string[] = [];
       for (const id of input.ids) {
         const kol = await getKolById(id);
@@ -405,7 +404,7 @@ const reportRouter = router({
       languages: z.array(z.string()).optional(),
       regions: z.array(z.string()).optional(),
       folderIds: z.array(z.number()).optional(),
-      maxResults: z.number().min(10).max(100).default(50),
+      maxResults: z.number().min(1).optional(), // no cap — paginate until exhausted or limit reached
     }))
     .mutation(async ({ input }) => {
       const apiKey = ENV.twitterApiIoKey;
@@ -478,7 +477,7 @@ const reportRouter = router({
 
       const collected: any[] = [];
       let cursor = "";
-      const maxToFetch = Math.min(input.maxResults, 100);
+      const maxToFetch = input.maxResults ?? Infinity; // no cap by default
 
       while (collected.length < maxToFetch) {
         const params = new URLSearchParams({ query, queryType: "Latest" });
@@ -539,6 +538,13 @@ const reportRouter = router({
           return region && input.regions!.some(reg => region.includes(reg.toLowerCase()));
         });
       }
+
+      // Log API usage: 15 credits per tweet
+      await logApiUsage({
+        operation: "search",
+        itemCount: collected.length,
+        context: input.keywords.join(" "),
+      });
 
       return { success: true, results: filtered, query, totalFound: collected.length };
     }),
@@ -624,6 +630,12 @@ const reportRouter = router({
     }),
 });
 
+// ─── Usage / Cost Tracker router ────────────────────────────────────────────
+
+const usageRouter = router({
+  getStats: protectedProcedure.query(() => getApiUsageStats()),
+});
+
 // ─── App router ───────────────────────────────────────────────────────────────
 
 export const appRouter = router({
@@ -639,69 +651,77 @@ export const appRouter = router({
   kol: kolRouter,
   folder: folderRouter,
   report: reportRouter,
+  usage: usageRouter,
 });
 
 export type AppRouter = typeof appRouter;
 
-// ─── X API enrichment helper ──────────────────────────────────────────────────
+// ─── twitterapi.io enrichment helper ─────────────────────────────────────────
 
 async function enrichSingleKol(
   id: number,
   handle: string,
-  bearerToken: string
+  apiKey: string
 ): Promise<{ success: boolean; reason?: string; message?: string }> {
   try {
     await updateKolEnrichment(id, { enrichmentStatus: "pending" });
 
-    // 1. Fetch user profile
-    const userUrl = `https://api.twitter.com/2/users/by/username/${encodeURIComponent(handle)}?user.fields=public_metrics,description,profile_image_url,location,created_at,verified,verified_type`;
-    const userRes = await fetch(userUrl, { headers: { Authorization: `Bearer ${bearerToken}` } });
+    // 1. Fetch user profile via twitterapi.io
+    const userUrl = `https://api.twitterapi.io/twitter/user/info?userName=${encodeURIComponent(handle)}`;
+    const userRes = await fetch(userUrl, { headers: { "X-API-Key": apiKey } });
     if (!userRes.ok) {
       const body = await userRes.text();
       await updateKolEnrichment(id, { enrichmentStatus: "failed" });
-      return { success: false, reason: `X_API_ERROR_${userRes.status}`, message: `X API returned ${userRes.status}: ${body.slice(0, 200)}` };
+      return { success: false, reason: `TWITTERAPI_IO_ERROR_${userRes.status}`, message: `twitterapi.io returned ${userRes.status}: ${body.slice(0, 200)}` };
     }
     const userJson = await userRes.json() as any;
-    const user = userJson?.data;
-    if (!user) {
+    // twitterapi.io returns user object directly (not nested under .data)
+    const user = userJson?.data ?? userJson;
+    if (!user || !user.userName) {
       await updateKolEnrichment(id, { enrichmentStatus: "failed" });
       return { success: false, reason: "USER_NOT_FOUND", message: `@${handle} not found on X` };
     }
-    const metrics = user.public_metrics ?? {};
 
     // 2. Fetch recent tweets mentioning @AethirCloud (fallback to general timeline)
-    const userId = user.id;
+    // twitterapi.io advanced search — no 7-day limit
     let tweets: any[] = [];
     try {
-      // First try: search tweets by this user mentioning @AethirCloud (last 7 days)
-      const searchUrl = `https://api.twitter.com/2/tweets/search/recent?query=from:${encodeURIComponent(handle)}%20@AethirCloud&max_results=10&tweet.fields=public_metrics,lang`;
-      const searchRes = await fetch(searchUrl, { headers: { Authorization: `Bearer ${bearerToken}` } });
+      const aethirQuery = `from:${handle} @AethirCloud -is:retweet`;
+      const searchParams = new URLSearchParams({ query: aethirQuery, queryType: "Latest" });
+      const searchRes = await fetch(
+        `https://api.twitterapi.io/twitter/tweet/advanced_search?${searchParams.toString()}`,
+        { headers: { "X-API-Key": apiKey } }
+      );
       if (searchRes.ok) {
         const searchJson = await searchRes.json() as any;
-        tweets = searchJson?.data ?? [];
+        tweets = (searchJson?.tweets ?? []).slice(0, 10);
       }
     } catch (_) {}
-    // Fallback: general timeline if no Aethir tweets found
+    // Fallback: general recent tweets
     if (tweets.length === 0) {
       try {
-        const timelineUrl = `https://api.twitter.com/2/users/${userId}/tweets?max_results=10&tweet.fields=public_metrics,lang&exclude=retweets,replies`;
-        const tlRes = await fetch(timelineUrl, { headers: { Authorization: `Bearer ${bearerToken}` } });
+        const tlParams = new URLSearchParams({ userName: handle });
+        const tlRes = await fetch(
+          `https://api.twitterapi.io/twitter/user/last_tweets?${tlParams.toString()}`,
+          { headers: { "X-API-Key": apiKey } }
+        );
         if (tlRes.ok) {
           const tlJson = await tlRes.json() as any;
-          tweets = tlJson?.data ?? [];
+          tweets = (tlJson?.tweets ?? []).slice(0, 10);
         }
       } catch (_) {}
     }
 
     // 3. Compute engagement averages from tweets
+    // twitterapi.io fields: likeCount, retweetCount, replyCount, quoteCount, viewCount
     let avgLikes: number | undefined;
     let avgRetweets: number | undefined;
     let avgReplies: number | undefined;
     let postLanguage: string | undefined;
     if (tweets.length > 0) {
-      const totalLikes = tweets.reduce((s: number, t: any) => s + (t.public_metrics?.like_count ?? 0), 0);
-      const totalRetweets = tweets.reduce((s: number, t: any) => s + (t.public_metrics?.retweet_count ?? 0), 0);
-      const totalReplies = tweets.reduce((s: number, t: any) => s + (t.public_metrics?.reply_count ?? 0), 0);
+      const totalLikes = tweets.reduce((s: number, t: any) => s + (t.likeCount ?? 0), 0);
+      const totalRetweets = tweets.reduce((s: number, t: any) => s + (t.retweetCount ?? 0), 0);
+      const totalReplies = tweets.reduce((s: number, t: any) => s + (t.replyCount ?? 0), 0);
       avgLikes = Math.round((totalLikes / tweets.length) * 100) / 100;
       avgRetweets = Math.round((totalRetweets / tweets.length) * 100) / 100;
       avgReplies = Math.round((totalReplies / tweets.length) * 100) / 100;
@@ -713,12 +733,11 @@ async function enrichSingleKol(
     }
 
     // 4. Compute engagement rate
-    const followerCount = metrics.followers_count ?? 0;
+    const followerCount = user.followers ?? 0;
     let engagementRate: number | undefined;
     if (followerCount > 0 && tweets.length > 0) {
       const totalEng = tweets.reduce((s: number, t: any) => {
-        const m = t.public_metrics ?? {};
-        return s + (m.like_count ?? 0) + (m.retweet_count ?? 0) + (m.reply_count ?? 0) + (m.quote_count ?? 0);
+        return s + (t.likeCount ?? 0) + (t.retweetCount ?? 0) + (t.replyCount ?? 0) + (t.quoteCount ?? 0);
       }, 0);
       engagementRate = Math.round((totalEng / tweets.length / followerCount) * 10000) / 100;
     }
@@ -741,23 +760,23 @@ async function enrichSingleKol(
       } catch (_) {}
     }
 
-    // 6. Verified status
+    // 6. Verified status — twitterapi.io uses isBlueVerified + verifiedType
     let verifiedStatus: string = "none";
-    if (user.verified_type) verifiedStatus = user.verified_type; // blue, business, government
-    else if (user.verified === true) verifiedStatus = "blue";
+    if (user.verifiedType) verifiedStatus = user.verifiedType;
+    else if (user.isBlueVerified === true) verifiedStatus = "blue";
 
     // 7. Account created at
-    const accountCreatedAt = user.created_at ? new Date(user.created_at) : undefined;
+    const accountCreatedAt = user.createdAt ? new Date(user.createdAt) : undefined;
 
     // 8. Profile image — use original size (remove _normal suffix)
-    const profileImageUrl = user.profile_image_url
-      ? user.profile_image_url.replace(/_normal\./, '.')
+    const profileImageUrl = user.profilePicture
+      ? (user.profilePicture as string).replace(/_normal\./, '.')
       : undefined;
 
     // 9. Write all fields
     await updateKol(id, {
       displayName: user.name ?? undefined,
-      followers: metrics.followers_count ?? undefined,
+      followers: user.followers ?? undefined,
       profileUrl: `https://x.com/${handle}`,
       platform: "X",
       profileBio: user.description ?? undefined,
@@ -772,6 +791,11 @@ async function enrichSingleKol(
       ...(normalizedRegion ? { region: normalizedRegion } : {}),
     });
     await updateKolEnrichment(id, { enrichmentStatus: "done", enrichedAt: new Date() });
+    // Log API usage: 18 credits for profile, 15 credits per tweet
+    await logApiUsage({ operation: "enrich_profile", itemCount: 1, context: `@${handle}` });
+    if (tweets.length > 0) {
+      await logApiUsage({ operation: "enrich_timeline", itemCount: tweets.length, context: `@${handle}` });
+    }
     return { success: true };
   } catch (e: any) {
     await updateKolEnrichment(id, { enrichmentStatus: "failed" });

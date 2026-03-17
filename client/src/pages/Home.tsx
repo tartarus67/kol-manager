@@ -1,7 +1,7 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
-import { Users, TrendingUp, Tag, Activity } from "lucide-react";
+import { Users, TrendingUp, Tag, Activity, DollarSign, Zap } from "lucide-react";
 import { useLocation } from "wouter";
 
 export default function Home() {
@@ -60,6 +60,9 @@ export default function Home() {
           <StatCard icon={<Tag className="h-4 w-4" />} label="Categories" value={categories.toString()} />
           <StatCard icon={<TrendingUp className="h-4 w-4" />} label="Total Followers" value={formatFollowers(totalFollowers)} />
         </div>
+
+        {/* API Cost Tracker */}
+        <CostTrackerCard />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Recent KOLs */}
@@ -181,6 +184,74 @@ function BreakdownCard({ title, data, total }: {
               </div>
             </div>
           ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CostTrackerCard() {
+  const { data: stats, isLoading } = trpc.usage.getStats.useQuery();
+
+  const opLabels: Record<string, string> = {
+    search: "Tweet Search",
+    enrich_profile: "Profile Enrichment",
+    enrich_timeline: "Timeline Fetch",
+  };
+
+  const totalUsd = stats?.totalCostUsd ?? 0;
+  const totalCredits = stats?.totalCredits ?? 0;
+
+  return (
+    <Card className="bg-card border-border">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+            <DollarSign className="h-3.5 w-3.5" />
+            twitterapi.io Usage &amp; Cost
+          </CardTitle>
+          <span className="text-xs text-muted-foreground">1 USD = 100,000 credits</span>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-12 bg-secondary/30 rounded animate-pulse" />
+        ) : (
+          <div className="flex flex-col sm:flex-row gap-4">
+            {/* Total spend */}
+            <div className="flex items-center gap-3 min-w-[160px]">
+              <div className="h-10 w-10 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                <DollarSign className="h-4 w-4 text-primary" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Total Spend</p>
+                <p className="text-xl font-bold text-foreground">${totalUsd.toFixed(4)}</p>
+                <p className="text-xs text-muted-foreground">{totalCredits.toLocaleString()} credits</p>
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="hidden sm:block w-px bg-border" />
+
+            {/* Per-operation breakdown */}
+            <div className="flex flex-wrap gap-x-6 gap-y-2 items-center">
+              {(stats?.byOperation ?? []).length === 0 ? (
+                <p className="text-xs text-muted-foreground">No API calls yet. Run a search or enrich a KOL to see usage.</p>
+              ) : (
+                (stats?.byOperation ?? []).map(op => (
+                  <div key={op.operation} className="flex items-center gap-2">
+                    <Zap className="h-3 w-3 text-primary/60 shrink-0" />
+                    <div>
+                      <p className="text-xs font-medium text-foreground">{opLabels[op.operation] ?? op.operation}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {op.calls} call{op.calls !== 1 ? "s" : ""} · {op.itemCount.toLocaleString()} items · ${op.costUsd.toFixed(4)}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>
