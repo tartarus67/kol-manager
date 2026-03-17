@@ -278,13 +278,10 @@ const kolRouter = router({
         return { success: false, reason: "TWITTERAPI_IO_KEY_MISSING", message: "twitterapi.io API key not configured.", enriched: 0, failed: 0 };
       }
       let enriched = 0; let failed = 0; const errors: string[] = [];
-      const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
       for (let i = 0; i < input.ids.length; i++) {
         const id = input.ids[i];
         const kol = await getKolById(id);
         if (!kol) continue;
-        // Respect twitterapi.io free-tier QPS: 1 req/5s. Add delay between KOLs.
-        if (i > 0) await sleep(5500);
         try {
           await updateKolEnrichment(id, { enrichmentStatus: "pending" });
           const result = await enrichSingleKol(id, kol.handle, apiKey);
