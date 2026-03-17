@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import {
   Search, Plus, X, Save, Download, Trash2, FileText,
   ChevronRight, Calendar, Users, Globe, Folder, AlertCircle,
-  ExternalLink, ArrowLeft, ChevronLeft, ChevronDown
+  ExternalLink, ArrowLeft, ChevronLeft, ChevronDown, RefreshCw
 } from "lucide-react";
 
 type SearchResult = {
@@ -430,6 +430,16 @@ export default function Reports() {
     { enabled: false }
   );
 
+  const utils = trpc.useUtils();
+
+  const rerunMutation = trpc.report.rerun.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Refreshed ${data.updated} tweets${data.failed > 0 ? `, ${data.failed} failed` : ""}`);
+      utils.report.getById.invalidate({ id: selectedReportId! });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const kols = kolsData ?? [];
   const folders = foldersData ?? [];
   const reports = reportsData ?? [];
@@ -650,6 +660,15 @@ export default function Reports() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline" size="sm"
+                onClick={() => rerunMutation.mutate({ id: report.id })}
+                disabled={rerunMutation.isPending}
+                className="border-border"
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${rerunMutation.isPending ? 'animate-spin' : ''}`} />
+                {rerunMutation.isPending ? "Refreshing..." : "Refresh Metrics"}
+              </Button>
               <Button
                 variant="outline" size="sm"
                 onClick={() => { setSelectedReportId(report.id); handleExport(report.id); }}

@@ -687,3 +687,9 @@ export async function autoInsertReportTweets(
 
   return { inserted, missingHandles };
 }
+
+export async function updateReportResult(id: number, data: Partial<Pick<InsertReportResult, "likes" | "retweets" | "replies" | "quotes" | "views" | "impressions" | "bookmarks">>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(reportResults).set(data).where(eq(reportResults.id, id));
+}

@@ -163,3 +163,7 @@
 - [x] Remove Smart Followers card from KOL profile top metrics
 - [x] Fix engagement rate formula: (likes+RT+replies+QT+saves)/views×100
 - [x] Recalculate all avg metrics from campaign posts using correct formula
+
+## Reports Re-run
+- [ ] Server: report.rerun procedure — re-fetches metrics for all tweet IDs in a saved report via twitterapi.io
+- [ ] UI: Re-run button on saved report detail view

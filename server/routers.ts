@@ -4,48 +4,16 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import {
-  listKols,
-  getKolById,
-  getKolPosts,
-  createKol,
-  updateKol,
-  deleteKol,
-  bulkImportWithPosts,
-  importHandles,
-  bulkDeleteKols,
-  bulkUpdateStatus,
-  bulkEditKols,
-  updateKolEnrichment,
-  listFolders,
-  getFolderById,
-  createFolder,
-  updateFolder,
-  deleteFolder,
-  getKolsInFolder,
-  getFoldersForKol,
-  addKolsToFolder,
-  removeKolsFromFolder,
-  setKolFolders,
-  createReport,
-  listReports,
-  getReportById,
-  deleteReport,
-  saveReportResults,
-  getReportResults,
-  logApiUsage,
-  getApiUsageStats,
-  listCampaigns,
-  getCampaignById,
-  createCampaign,
-  updateCampaign,
-  deleteCampaign,
-  getCampaignPosts,
-  getKolCampaignPosts,
-  insertCampaignPost,
-  updateCampaignPost,
-  deleteCampaignPost,
-  recalcKolMetrics,
-  autoInsertReportTweets,
+  listKols, getKolById, createKol, updateKol, deleteKol, bulkDeleteKols,
+  bulkUpdateStatus, bulkEditKols, updateKolEnrichment, importHandles,
+  bulkImportWithPosts, getKolPosts,
+  listFolders, getFolderById, createFolder, updateFolder, deleteFolder,
+  getKolsInFolder, getFoldersForKol, addKolsToFolder, removeKolsFromFolder, setKolFolders,
+  createReport, listReports, getReportById, deleteReport, saveReportResults, getReportResults, updateReportResult,
+  logApiUsage, getApiUsageStats,
+  listCampaigns, getCampaignById, createCampaign, updateCampaign, deleteCampaign,
+  getCampaignPosts, getKolCampaignPosts, insertCampaignPost, updateCampaignPost, deleteCampaignPost,
+  recalcKolMetrics, autoInsertReportTweets,
 } from "./db";
 import { parseCSV } from "./csvIntake";
 import { ENV } from "./_core/env";
@@ -699,6 +667,81 @@ const reportRouter = router({
         escape(r.quotes), escape(r.views ?? ""), escape(r.bookmarks ?? ""), escape(r.url),
       ].join(","));
       return { csv: [headers.join(","), ...rows].join("\n"), filename: `${report.name.replace(/[^a-z0-9]/gi, "_")}.csv` };
+    }),
+
+  rerun: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const apiKey = ENV.twitterApiIoKey;
+      if (!apiKey) throw new Error("twitterapi.io API key not configured");
+
+      const results = await getReportResults(input.id);
+      if (results.length === 0) return { updated: 0, failed: 0 };
+
+      // fetchWithRetry helper (same as used in fetchMetrics)
+      const fetchWithRetry = async (url: string, opts: RequestInit, retries = 3): Promise<Response> => {
+        for (let i = 0; i < retries; i++) {
+          const res = await fetch(url, opts);
+          if (res.status === 429) {
+            await new Promise(r => setTimeout(r, 2000 * (i + 1)));
+            continue;
+          }
+          return res;
+        }
+        return fetch(url, opts);
+      };
+
+      let updated = 0;
+      let failed = 0;
+
+      for (const result of results) {
+        if (!result.tweetId) continue;
+        try {
+          let tweet: any = null;
+
+          // Primary: direct tweet lookup by ID
+          const r1 = await fetchWithRetry(
+            `https://api.twitterapi.io/twitter/tweets?tweet_ids=${result.tweetId}`,
+            { headers: { "X-API-Key": apiKey } }
+          );
+          if (r1.ok) {
+            const j1 = await r1.json() as any;
+            const tweets = Array.isArray(j1) ? j1 : (j1?.tweets ?? []);
+            tweet = tweets.find((t: any) => String(t.id) === String(result.tweetId)) ?? tweets[0] ?? null;
+          }
+
+          // Fallback: url search
+          if (!tweet) {
+            const q2 = encodeURIComponent(`url:twitter.com/i/web/status/${result.tweetId}`);
+            const r2 = await fetchWithRetry(
+              `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${q2}&queryType=Latest&count=5`,
+              { headers: { "X-API-Key": apiKey } }
+            );
+            if (r2.ok) {
+              const j2 = await r2.json() as any;
+              tweet = (j2?.tweets ?? []).find((t: any) => String(t.id) === String(result.tweetId)) ?? null;
+            }
+          }
+
+          if (!tweet) { failed++; continue; }
+
+          await updateReportResult(result.id, {
+            likes: tweet.likeCount ?? 0,
+            retweets: tweet.retweetCount ?? 0,
+            replies: tweet.replyCount ?? 0,
+            quotes: tweet.quoteCount ?? 0,
+            views: tweet.viewCount ?? null,
+            impressions: tweet.viewCount ?? null,
+            bookmarks: tweet.bookmarkCount ?? null,
+          });
+          updated++;
+        } catch {
+          failed++;
+        }
+      }
+
+      await logApiUsage({ operation: "report_rerun", itemCount: updated, context: `report:${input.id}` });
+      return { updated, failed };
     }),
 });
 
