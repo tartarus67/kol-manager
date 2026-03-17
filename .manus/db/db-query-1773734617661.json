@@ -1,0 +1,109 @@
+{
+  "query": "SELECT id, tweetUrl, tweetId, kolHandle, fetchStatus, fetchError, likes, retweets, views FROM campaign_posts LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user s8wnVbZA4yzfrg7.8ebc791ac56d --database DZjTmaPHn9nCzaD9AuvmrW --execute SELECT id, tweetUrl, tweetId, kolHandle, fetchStatus, fetchError, likes, retweets, views FROM campaign_posts LIMIT 10;",
+  "rows": [
+    {
+      "id": "1",
+      "tweetUrl": "https://x.com/flarrs315/status/1864085313683063071",
+      "tweetId": "1864085313683063071",
+      "kolHandle": "flarrs315",
+      "fetchStatus": "done",
+      "fetchError": "NULL",
+      "likes": "0",
+      "retweets": "0",
+      "views": "1151"
+    },
+    {
+      "id": "2",
+      "tweetUrl": "https://x.com/flarrs315/status/1877268110794961035",
+      "tweetId": "1877268110794961035",
+      "kolHandle": "flarrs315",
+      "fetchStatus": "done",
+      "fetchError": "NULL",
+      "likes": "0",
+      "retweets": "0",
+      "views": "1619"
+    },
+    {
+      "id": "3",
+      "tweetUrl": "https://x.com/flarrs315/status/1881085993505505645",
+      "tweetId": "1881085993505505645",
+      "kolHandle": "flarrs315",
+      "fetchStatus": "done",
+      "fetchError": "NULL",
+      "likes": "0",
+      "retweets": "0",
+      "views": "899"
+    },
+    {
+      "id": "4",
+      "tweetUrl": "https://x.com/benft_io/status/1887023556875407382",
+      "tweetId": "1887023556875407382",
+      "kolHandle": "benft_io",
+      "fetchStatus": "done",
+      "fetchError": "NULL",
+      "likes": "0",
+      "retweets": "0",
+      "views": "266"
+    },
+    {
+      "id": "5",
+      "tweetUrl": "https://x.com/Edward__Park/status/1905596359383945413",
+      "tweetId": "1905596359383945413",
+      "kolHandle": "edward__park",
+      "fetchStatus": "done",
+      "fetchError": "NULL",
+      "likes": "0",
+      "retweets": "0",
+      "views": "8141"
+    },
+    {
+      "id": "6",
+      "tweetUrl": "https://x.com/coinboy717/status/1907803730956943528?t=MFR8_4qUV4fx5vLAD5Ql-w&s=19",
+      "tweetId": "1907803730956943528",
+      "kolHandle": "coinboy717",
+      "fetchStatus": "done",
+      "fetchError": "NULL",
+      "likes": "0",
+      "retweets": "0",
+      "views": "10888"
+    },
+    {
+      "id": "7",
+      "tweetUrl": "https://x.com/Edward__Park/status/1933014315424211373",
+      "tweetId": "1933014315424211373",
+      "kolHandle": "edward__park",
+      "fetchStatus": "done",
+      "fetchError": "NULL",
+      "likes": "0",
+      "retweets": "0",
+      "views": "2049"
+    },
+    {
+      "id": "8",
+      "tweetUrl": "https://x.com/oldman_cek/status/1937763981646762053",
+      "tweetId": "1937763981646762053",
+      "kolHandle": "oldman_cek",
+      "fetchStatus": "done",
+      "fetchError": "NULL",
+      "likes": "0",
+      "retweets": "0",
+      "views": "574"
+    },
+    {
+      "id": "9",
+      "tweetUrl": "https://x.com/oldman_cek/status/1951655991361360245",
+      "tweetId": "1951655991361360245",
+      "kolHandle": "oldman_cek",
+      "fetchStatus": "done",
+      "fetchError": "NULL",
+      "likes": "0",
+      "retweets": "0",
+      "views": "695"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\ttweetUrl\ttweetId\tkolHandle\tfetchStatus\tfetchError\tlikes\tretweets\tviews\n1\thttps://x.com/flarrs315/status/1864085313683063071\t1864085313683063071\tflarrs315\tdone\tNULL\t0\t0\t1151\n2\thttps://x.com/flarrs315/status/1877268110794961035\t1877268110794961035\tflarrs315\tdone\tNULL\t0\t0\t1619\n3\thttps://x.com/flarrs315/status/1881085993505505645\t1881085993505505645\tflarrs315\tdone\tNULL\t0\t0\t899\n4\thttps://x.com/benft_io/status/1887023556875407382\t1887023556875407382\tbenft_io\tdone\tNULL\t0\t0\t266\n5\thttps://x.com/Edward__Park/status/1905596359383945413\t1905596359383945413\tedward__park\tdone\tNULL\t0\t0\t8141\n6\thttps://x.com/coinboy717/status/1907803730956943528?t=MFR8_4qUV4fx5vLAD5Ql-w&s=19\t1907803730956943528\tcoinboy717\tdone\tNULL\t0\t0\t10888\n7\thttps://x.com/Edward__Park/status/1933014315424211373\t1933014315424211373\tedward__park\tdone\tNULL\t0\t0\t2049\n8\thttps://x.com/oldman_cek/status/1937763981646762053\t1937763981646762053\toldman_cek\tdone\tNULL\t0\t0\t574\n9\thttps://x.com/oldman_cek/status/1951655991361360245\t1951655991361360245\toldman_cek\tdone\tNULL\t0\t0\t695\n",
+  "stderr": "",
+  "execution_time_ms": 57
+}

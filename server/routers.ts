@@ -44,6 +44,8 @@ import {
   insertCampaignPost,
   updateCampaignPost,
   deleteCampaignPost,
+  recalcKolMetrics,
+  autoInsertReportTweets,
 } from "./db";
 import { parseCSV } from "./csvIntake";
 import { ENV } from "./_core/env";
@@ -557,7 +559,17 @@ const reportRouter = router({
         context: input.keywords.join(" "),
       });
 
-      return { success: true, results: filtered, query, totalFound: collected.length };
+      // Auto-insert report tweets into KOL campaign posts + detect missing KOLs
+      const { inserted: autoInserted, missingHandles } = await autoInsertReportTweets(filtered);
+
+      return {
+        success: true,
+        results: filtered,
+        query,
+        totalFound: collected.length,
+        autoInserted,
+        missingHandles,
+      };
     }),
 
   save: protectedProcedure
@@ -743,47 +755,85 @@ const campaignRouter = router({
       return { inserted: inserted.length };
     }),
 
-  // Fetch metrics for all pending posts in a campaign from twitterapi.io
+  // Fetch metrics for all posts in a campaign from twitterapi.io (re-fetches all, not just pending)
   fetchMetrics: protectedProcedure
     .input(z.object({ campaignId: z.number() }))
     .mutation(async ({ input }) => {
       const posts = await getCampaignPosts(input.campaignId);
-      const pending = posts.filter(p => p.fetchStatus === "pending" && p.tweetId);
+      // Re-fetch ALL posts (pending + done + failed) — always get fresh metrics
+      const toFetch = posts.filter(p => p.tweetId);
       let done = 0;
       let failed = 0;
       const apiKey = ENV.twitterApiIoKey;
       if (!apiKey) throw new Error("twitterapi_io_key not configured");
 
-      for (const post of pending) {
-        try {
-          const res = await fetchWithRetry(
-            `https://api.twitterapi.io/twitter/tweets?tweet_ids=${post.tweetId}`,
-            { headers: { "X-API-Key": apiKey } }
-          );
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const json = await res.json() as any;
-          const tweet = json?.tweets?.[0] ?? json?.data?.[0];
-          if (!tweet) throw new Error("No tweet in response");
+      const affectedKolIds = new Set<number>();
+      const missingHandles = new Set<string>();
 
-          const metrics = tweet.public_metrics ?? tweet;
+      for (const post of toFetch) {
+        try {
+          // Best approach: search from:handle with since_id/max_id bracket
+          // Fallback: search by tweet ID in URL
+          let tweet: any = null;
+
+          if (post.kolHandle) {
+            // Primary: search from:handle filtered to exact tweet ID range
+            // Subtract 1 from tweet ID string for since_id bracket
+            const sinceId = String(Number(post.tweetId!) - 1);
+            const q = encodeURIComponent(`from:${post.kolHandle} since_id:${sinceId} max_id:${post.tweetId}`);
+            const res = await fetchWithRetry(
+              `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${q}&queryType=Latest&count=1`,
+              { headers: { "X-API-Key": apiKey } }
+            );
+            if (res.ok) {
+              const json = await res.json() as any;
+              tweet = json?.tweets?.find((t: any) => String(t.id) === String(post.tweetId))
+                ?? (json?.tweets?.length === 1 ? json.tweets[0] : null);
+            }
+          }
+
+          // Fallback: search by URL containing the tweet ID
+          if (!tweet) {
+            const q2 = encodeURIComponent(`url:${post.tweetId}`);
+            const res2 = await fetchWithRetry(
+              `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${q2}&queryType=Latest&count=1`,
+              { headers: { "X-API-Key": apiKey } }
+            );
+            if (res2.ok) {
+              const j2 = await res2.json() as any;
+              tweet = j2?.tweets?.find((t: any) => String(t.id) === String(post.tweetId))
+                ?? (j2?.tweets?.length > 0 ? j2.tweets[0] : null);
+            }
+          }
+
+          if (!tweet) throw new Error("Tweet not found");
+
+          // twitterapi.io uses flat camelCase field names
           const updates: any = {
-            likes: metrics.like_count ?? metrics.likes ?? 0,
-            retweets: metrics.retweet_count ?? metrics.retweets ?? 0,
-            replies: metrics.reply_count ?? metrics.replies ?? 0,
-            quotes: metrics.quote_count ?? metrics.quotes ?? 0,
-            views: tweet.viewCount ?? tweet.view_count ?? metrics.impression_count ?? null,
-            bookmarks: metrics.bookmark_count ?? metrics.bookmarks ?? null,
-            tweetText: tweet.text ?? tweet.full_text ?? null,
+            likes: tweet.likeCount ?? 0,
+            retweets: tweet.retweetCount ?? 0,
+            replies: tweet.replyCount ?? 0,
+            quotes: tweet.quoteCount ?? 0,
+            views: tweet.viewCount ?? null,
+            bookmarks: tweet.bookmarkCount ?? null,
+            tweetText: tweet.text ?? null,
             fetchStatus: "done" as const,
+            fetchError: null,
             fetchedAt: new Date(),
           };
 
-          // Try to match KOL by handle
+          // Match KOL by handle
           if (post.kolHandle) {
-            const kolRows = await (await import("./db")).listKols(post.kolHandle);
-            const matched = kolRows.find((k: any) => k.handle?.toLowerCase() === post.kolHandle?.toLowerCase());
-            if (matched) updates.kolId = matched.id;
+            const allKols = await listKols();
+            const matched = allKols.find(k => k.handle?.toLowerCase() === post.kolHandle?.toLowerCase());
+            if (matched) {
+              updates.kolId = matched.id;
+              affectedKolIds.add(matched.id);
+            } else {
+              missingHandles.add(post.kolHandle);
+            }
           }
+          if (post.kolId) affectedKolIds.add(post.kolId);
 
           await updateCampaignPost(post.id, updates);
           await logApiUsage({ operation: "campaign_fetch", itemCount: 1, context: `campaign:${input.campaignId}` });
@@ -793,7 +843,13 @@ const campaignRouter = router({
           failed++;
         }
       }
-      return { done, failed, total: pending.length };
+
+      // Recalculate avg metrics for all affected KOLs
+      for (const kolId of affectedKolIds) {
+        await recalcKolMetrics(kolId);
+      }
+
+      return { done, failed, total: toFetch.length, missingHandles: [...missingHandles] };
     }),
 
   updatePost: protectedProcedure

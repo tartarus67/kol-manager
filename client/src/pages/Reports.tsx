@@ -353,6 +353,14 @@ export default function Reports() {
   const [searchQuery, setSearchQuery] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
 
+  // Missing KOL popup state
+  const [missingHandles, setMissingHandles] = useState<string[]>([]);
+  const [showMissingKolModal, setShowMissingKolModal] = useState(false);
+  const [selectedMissingHandles, setSelectedMissingHandles] = useState<Set<string>>(new Set());
+  const [missingKolFolderIds, setMissingKolFolderIds] = useState<number[]>([]);
+  const [missingKolCampaignId, setMissingKolCampaignId] = useState<number | null>(null);
+  const [creatingMissingKols, setCreatingMissingKols] = useState(false);
+
   // Save modal state
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [reportName, setReportName] = useState("");
@@ -370,6 +378,10 @@ export default function Reports() {
     { enabled: !!selectedReportId && view === "detail" }
   );
 
+  const importHandlesMutation = trpc.kol.importHandles.useMutation();
+  const addToFolderMutation = trpc.folder.addKols.useMutation();
+  const { data: campaignsData } = trpc.campaign.list.useQuery();
+
   const searchMutation = trpc.report.search.useMutation({
     onSuccess: (data) => {
       if (!data.success) {
@@ -379,7 +391,15 @@ export default function Reports() {
       setSearchResults(data.results as SearchResult[]);
       setSearchQuery((data as any).query ?? "");
       setHasSearched(true);
-      toast.success(`Found ${data.results.length} tweets`);
+      const missing = (data as any).missingHandles as string[] | undefined;
+      if (missing && missing.length > 0) {
+        setMissingHandles(missing);
+        setSelectedMissingHandles(new Set(missing));
+        setShowMissingKolModal(true);
+        toast.success(`Found ${data.results.length} tweets — ${missing.length} new KOL${missing.length > 1 ? 's' : ''} detected`);
+      } else {
+        toast.success(`Found ${data.results.length} tweets`);
+      }
     },
     onError: (err) => toast.error(err.message),
   });
@@ -934,6 +954,116 @@ export default function Reports() {
           </div>
         </div>
       </div>
+
+      {/* Missing KOL Modal */}
+      <Dialog open={showMissingKolModal} onOpenChange={setShowMissingKolModal}>
+        <DialogContent className="bg-card border-border max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-foreground">
+              {missingHandles.length} New KOL{missingHandles.length > 1 ? 's' : ''} Detected
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              These handles appeared in your search results but aren't in your KOL database yet.
+              Select which ones to add:
+            </p>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              {missingHandles.map(handle => (
+                <label key={handle} className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 rounded px-2 py-1">
+                  <input
+                    type="checkbox"
+                    checked={selectedMissingHandles.has(handle)}
+                    onChange={e => {
+                      const next = new Set(selectedMissingHandles);
+                      if (e.target.checked) next.add(handle); else next.delete(handle);
+                      setSelectedMissingHandles(next);
+                    }}
+                    className="accent-[#D8FE51]"
+                  />
+                  <span className="text-sm text-foreground font-mono">@{handle}</span>
+                </label>
+              ))}
+            </div>
+
+            {/* Folder assignment */}
+            {foldersData && foldersData.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Add to Folder (optional)</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {foldersData.map(f => (
+                    <button
+                      key={f.id}
+                      onClick={() => setMissingKolFolderIds(prev =>
+                        prev.includes(f.id) ? prev.filter(id => id !== f.id) : [...prev, f.id]
+                      )}
+                      className={`px-2.5 py-1 rounded text-xs border transition-colors ${
+                        missingKolFolderIds.includes(f.id)
+                          ? 'bg-[#D8FE51] text-black border-[#D8FE51]'
+                          : 'bg-transparent text-muted-foreground border-border hover:border-[#D8FE51]/50'
+                      }`}
+                    >
+                      {f.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Campaign assignment */}
+            {campaignsData && campaignsData.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Add to Campaign (optional)</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {campaignsData.map((c: any) => (
+                    <button
+                      key={c.id}
+                      onClick={() => setMissingKolCampaignId(prev => prev === c.id ? null : c.id)}
+                      className={`px-2.5 py-1 rounded text-xs border transition-colors ${
+                        missingKolCampaignId === c.id
+                          ? 'bg-[#D8FE51] text-black border-[#D8FE51]'
+                          : 'bg-transparent text-muted-foreground border-border hover:border-[#D8FE51]/50'
+                      }`}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowMissingKolModal(false)}>Skip</Button>
+            <Button
+              disabled={selectedMissingHandles.size === 0 || creatingMissingKols}
+              onClick={async () => {
+                setCreatingMissingKols(true);
+                try {
+                  const handles = [...selectedMissingHandles];
+                  const result = await importHandlesMutation.mutateAsync({ handles });
+                  // Add to folders if selected
+                  if (missingKolFolderIds.length > 0 && result.insertedIds.length > 0) {
+                    for (const folderId of missingKolFolderIds) {
+                      await addToFolderMutation.mutateAsync({ kolIds: result.insertedIds, folderId });
+                    }
+                  }
+                  toast.success(`Added ${result.inserted} KOL${result.inserted > 1 ? 's' : ''} to database`);
+                  setShowMissingKolModal(false);
+                  setMissingKolFolderIds([]);
+                  setMissingKolCampaignId(null);
+                } catch (err: any) {
+                  toast.error(err.message ?? 'Failed to create KOL profiles');
+                } finally {
+                  setCreatingMissingKols(false);
+                }
+              }}
+              className="bg-[#D8FE51] text-black hover:bg-[#c8ee41]"
+            >
+              {creatingMissingKols ? 'Creating...' : `Add ${selectedMissingHandles.size} KOL${selectedMissingHandles.size > 1 ? 's' : ''}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Save Modal */}
       <Dialog open={showSaveModal} onOpenChange={setShowSaveModal}>

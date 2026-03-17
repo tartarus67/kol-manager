@@ -148,3 +148,13 @@
 - [x] Campaigns page: campaign detail view with post URL import, posts table, budget editing
 - [x] KOL profile page: show campaign post history with engagement metrics
 - [x] Add Campaigns to sidebar navigation
+
+## Auto-Metrics & Missing KOL Detection
+- [ ] Fix campaign fetchMetrics: use correct twitterapi.io flat field names (retweetCount, likeCount, etc.)
+- [ ] Fix campaign fetchMetrics: reset status to "pending" for already-fetched posts so user can re-fetch
+- [ ] Server: after campaign fetchMetrics, recalculate KOL avg metrics (avgLikes, avgRetweets, avgReplies, avgViews, engagementRate) from all campaign posts
+- [ ] Server: after report search completes, auto-insert matching tweets into campaign_posts linked to known KOLs
+- [ ] Server: after report search, return list of unknown handles (in results but not in KOL DB)
+- [ ] Server: after campaign fetchMetrics, return list of unknown handles
+- [ ] UI: "Missing KOLs" popup after report search — shows unknown handles, lets user create profiles, assign folders and campaigns
+- [ ] UI: KOL profile metrics (avgViews, avgLikes, avgRetweets, avgReplies, engagementRate) auto-update from campaign posts

@@ -534,3 +534,151 @@ export async function deleteCampaignPost(id: number): Promise<void> {
   if (!db) return;
   await db.delete(campaignPosts).where(eq(campaignPosts.id, id));
 }
+
+// ─── KOL avg-metrics recalculation from campaign posts ───────────────────────
+
+/**
+ * Recalculate and persist avg metrics for a KOL based on all their campaign posts.
+ * Called after fetchMetrics completes or after report tweets are inserted.
+ */
+export async function recalcKolMetrics(kolId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const posts = await db
+    .select()
+    .from(campaignPosts)
+    .where(and(eq(campaignPosts.kolId, kolId), eq(campaignPosts.fetchStatus, "done")));
+  if (posts.length === 0) return;
+
+  const avg = (arr: (number | null | undefined)[]) => {
+    const valid = arr.filter((v): v is number => v != null);
+    return valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
+  };
+
+  const avgLikes = avg(posts.map(p => p.likes));
+  const avgRetweets = avg(posts.map(p => p.retweets));
+  const avgReplies = avg(posts.map(p => p.replies));
+  const avgImpressions = avg(posts.map(p => p.views));
+  const avgEngagement = avg(posts.map(p =>
+    (p.likes ?? 0) + (p.retweets ?? 0) + (p.replies ?? 0) + (p.quotes ?? 0)
+  ));
+
+  // Engagement rate = avgEngagement / avgImpressions (if views available), else null
+  const engagementRate =
+    avgEngagement != null && avgImpressions != null && avgImpressions > 0
+      ? avgEngagement / avgImpressions
+      : null;
+
+  const setData: any = {};
+  if (avgLikes != null) setData.avgLikes = avgLikes;
+  if (avgRetweets != null) setData.avgRetweets = avgRetweets;
+  if (avgReplies != null) setData.avgReplies = avgReplies;
+  if (avgImpressions != null) setData.avgImpressions = avgImpressions;
+  if (avgEngagement != null) setData.avgEngagement = avgEngagement;
+  if (engagementRate != null) setData.engagementRate = engagementRate;
+  if (Object.keys(setData).length > 0) {
+    await db.update(kols).set(setData).where(eq(kols.id, kolId));
+  }
+}
+
+/**
+ * Auto-insert report results as campaign posts for matched KOLs.
+ * Creates a "Reports" system campaign if one doesn't exist.
+ * Returns list of handles that appeared in results but are NOT in the KOL DB.
+ */
+export async function autoInsertReportTweets(
+  results: Array<{
+    tweetId?: string;
+    authorHandle?: string;
+    authorName?: string;
+    kolId?: number | null;
+    content?: string;
+    url?: string;
+    likes?: number;
+    retweets?: number;
+    replies?: number;
+    quotes?: number;
+    views?: number | null;
+    bookmarks?: number | null;
+    postedAt?: Date | null;
+    language?: string;
+  }>
+): Promise<{ inserted: number; missingHandles: string[] }> {
+  const db = await getDb();
+  if (!db) return { inserted: 0, missingHandles: [] };
+
+  // Collect all unique handles from results
+  const allHandles = [...new Set(
+    results.map(r => r.authorHandle?.toLowerCase()).filter(Boolean) as string[]
+  )];
+
+  // Get all KOLs to build handle→id map
+  const allKols = await db.select({ id: kols.id, handle: kols.handle }).from(kols);
+  const handleToId = new Map(allKols.map(k => [k.handle.toLowerCase(), k.id]));
+
+  // Missing handles: in results but not in DB
+  const missingHandles = allHandles.filter(h => !handleToId.has(h));
+
+  // Find or create a "Reports (Auto)" system campaign
+  let sysCampaign = await db
+    .select()
+    .from(campaigns)
+    .where(eq(campaigns.name, "Reports (Auto)"))
+    .limit(1);
+
+  let campaignId: number;
+  if (sysCampaign.length > 0) {
+    campaignId = sysCampaign[0].id;
+  } else {
+    const res = await db.insert(campaigns).values({
+      name: "Reports (Auto)",
+      description: "Auto-created campaign for tweets found in report searches",
+      status: "active",
+    });
+    campaignId = (res[0] as any).insertId as number;
+  }
+
+  // Get existing tweetIds in this campaign to avoid duplicates
+  const existing = await db
+    .select({ tweetId: campaignPosts.tweetId })
+    .from(campaignPosts)
+    .where(eq(campaignPosts.campaignId, campaignId));
+  const existingIds = new Set(existing.map(r => r.tweetId).filter(Boolean));
+
+  let inserted = 0;
+  const affectedKolIds = new Set<number>();
+
+  for (const r of results) {
+    if (!r.tweetId || existingIds.has(r.tweetId)) continue;
+    const handle = r.authorHandle?.toLowerCase() ?? "";
+    const kolId = handleToId.get(handle) ?? null;
+    if (!kolId) continue; // only insert for known KOLs
+
+    await db.insert(campaignPosts).values({
+      campaignId,
+      kolId,
+      tweetUrl: r.url ?? `https://x.com/${r.authorHandle}/status/${r.tweetId}`,
+      tweetId: r.tweetId,
+      kolHandle: r.authorHandle ?? null,
+      likes: r.likes ?? 0,
+      retweets: r.retweets ?? 0,
+      replies: r.replies ?? 0,
+      quotes: r.quotes ?? 0,
+      views: r.views ?? null,
+      bookmarks: r.bookmarks ?? null,
+      tweetText: r.content ?? null,
+      fetchStatus: "done",
+      fetchedAt: new Date(),
+    });
+    existingIds.add(r.tweetId);
+    affectedKolIds.add(kolId);
+    inserted++;
+  }
+
+  // Recalculate metrics for all affected KOLs
+  for (const kolId of affectedKolIds) {
+    await recalcKolMetrics(kolId);
+  }
+
+  return { inserted, missingHandles };
+}
