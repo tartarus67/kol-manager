@@ -19,10 +19,11 @@ import {
   FolderPlus, CheckSquare, Zap, UserPlus, Pencil,
 } from "lucide-react";
 import { useState, useRef, useMemo } from "react";
+import { ColumnHeader, SortDir as ColSortDir } from "@/components/ColumnHeader";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 
-type SortField = "displayName" | "followers" | "engagementRate" | "region" | "category" | "status";
+type SortField = "displayName" | "followers" | "engagementRate" | "region" | "category" | "status" | "postLanguage";
 type SortDir = "asc" | "desc";
 
 function formatNum(n: number | null | undefined) {
@@ -58,6 +59,19 @@ export default function KolList() {
   // ─── Sort ──────────────────────────────────────────────────────────────────
   const [sortField, setSortField] = useState<SortField>("displayName");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  // ─── Column filters (checkbox value selection) ─────────────────────────────
+  const [colFilters, setColFilters] = useState<Record<string, Set<string>>>({}); 
+
+  function setColFilter(key: string, values: Set<string>) {
+    setColFilters(prev => ({ ...prev, [key]: values }));
+  }
+
+  function handleColSort(key: string, dir: ColSortDir) {
+    if (dir === null) { setSortField("displayName"); setSortDir("asc"); return; }
+    setSortField(key as SortField);
+    setSortDir(dir as SortDir);
+  }
 
   // ─── Selection ─────────────────────────────────────────────────────────────
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -204,9 +218,25 @@ export default function KolList() {
     return Array.from(s).sort();
   }, [kols]);
 
+  // Unique values per column for checkbox filters
+  const colValues = useMemo(() => ({
+    region: Array.from(new Set(kols.map(k => k.region ?? ""))).sort(),
+    category: Array.from(new Set(kols.map(k => k.category ?? ""))).sort(),
+    status: Array.from(new Set(kols.map(k => k.status ?? ""))).sort(),
+    postLanguage: Array.from(new Set(kols.map(k => (k as any).postLanguage ?? ""))).sort(),
+  }), [kols]);
+
   const filtered = useMemo(() => {
     let list = [...kols];
     if (statusFilter !== "all") list = list.filter(k => k.status === statusFilter);
+    // Apply column filters
+    for (const [key, values] of Object.entries(colFilters)) {
+      if (values.size === 0) continue;
+      list = list.filter(k => {
+        const v = String((k as any)[key] ?? "");
+        return values.has(v);
+      });
+    }
     list.sort((a, b) => {
       let av: any = a[sortField];
       let bv: any = b[sortField];
@@ -491,29 +521,16 @@ export default function KolList() {
                       aria-label="Select all"
                     />
                   </th>
-                  {([
-                    { label: "KOL", field: "displayName" as SortField },
-                    { label: "Platform", field: null },
-                    { label: "Region", field: "region" as SortField },
-                    { label: "Language", field: null },
-                    { label: "Category", field: "category" as SortField },
-                    { label: "Followers", field: "followers" as SortField },
-                    { label: "Eng. Rate", field: "engagementRate" as SortField },
-                    { label: "Status", field: "status" as SortField },
-                    { label: "Enriched", field: null },
-                    { label: "", field: null },
-                  ] as { label: string; field: SortField | null }[]).map(({ label, field }) => (
-                    <th
-                      key={label}
-                      className={`px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider ${field ? "cursor-pointer hover:text-foreground select-none" : ""}`}
-                      onClick={field ? () => handleSort(field) : undefined}
-                    >
-                      <div className="flex items-center gap-1">
-                        {label}
-                        {field && <SortIcon field={field} />}
-                      </div>
-                    </th>
-                  ))}
+                  <th className="px-4 py-3 text-left"><ColumnHeader label="KOL" sortKey="displayName" sortDir={sortField==="displayName"?sortDir:null} onSort={handleColSort} /></th>
+                  <th className="px-4 py-3 text-left"><span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Platform</span></th>
+                  <th className="px-4 py-3 text-left"><ColumnHeader label="Region" sortKey="region" sortDir={sortField==="region"?sortDir:null} onSort={handleColSort} filterValues={colValues.region} selectedValues={colFilters.region??new Set()} onFilterChange={(v)=>setColFilter("region",v)} /></th>
+                  <th className="px-4 py-3 text-left"><ColumnHeader label="Language" sortKey="postLanguage" sortDir={sortField==="postLanguage"?sortDir:null} onSort={handleColSort} filterValues={colValues.postLanguage} selectedValues={colFilters.postLanguage??new Set()} onFilterChange={(v)=>setColFilter("postLanguage",v)} /></th>
+                  <th className="px-4 py-3 text-left"><ColumnHeader label="Category" sortKey="category" sortDir={sortField==="category"?sortDir:null} onSort={handleColSort} filterValues={colValues.category} selectedValues={colFilters.category??new Set()} onFilterChange={(v)=>setColFilter("category",v)} /></th>
+                  <th className="px-4 py-3 text-left"><ColumnHeader label="Followers" sortKey="followers" sortDir={sortField==="followers"?sortDir:null} onSort={handleColSort} /></th>
+                  <th className="px-4 py-3 text-left"><ColumnHeader label="Eng. Rate" sortKey="engagementRate" sortDir={sortField==="engagementRate"?sortDir:null} onSort={handleColSort} /></th>
+                  <th className="px-4 py-3 text-left"><ColumnHeader label="Status" sortKey="status" sortDir={sortField==="status"?sortDir:null} onSort={handleColSort} filterValues={colValues.status} selectedValues={colFilters.status??new Set()} onFilterChange={(v)=>setColFilter("status",v)} /></th>
+                  <th className="px-4 py-3 text-left"><span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Enriched</span></th>
+                  <th className="px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody>

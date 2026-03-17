@@ -12,6 +12,7 @@ import {
   ChevronRight, Calendar, Users, Globe, Folder, AlertCircle,
   ExternalLink, ArrowLeft, ChevronLeft, ChevronDown, RefreshCw
 } from "lucide-react";
+import { ColumnHeader, SortDir as ColSortDir } from "@/components/ColumnHeader";
 
 type SearchResult = {
   tweetId?: string;
@@ -1119,31 +1120,95 @@ export default function Reports() {
 
 // ── Results Table Component ────────────────────────────────────────────────────
 
+type ReportSortKey = "authorHandle" | "postedAt" | "language" | "views" | "likes" | "retweets" | "replies" | "quotes" | "bookmarks";
+
 function ResultsTable({ results, formatDate, formatNum }: {
   results: SearchResult[];
   formatDate: (d: any) => string;
   formatNum: (n: any) => string;
 }) {
+  const [sortKey, setSortKey] = useState<ReportSortKey | null>(null);
+  const [sortDir, setSortDir] = useState<ColSortDir>(null);
+  const [colFilters, setColFilters] = useState<Record<string, Set<string>>>({});
+
+  function handleSort(key: string, dir: ColSortDir) {
+    setSortKey(dir ? key as ReportSortKey : null);
+    setSortDir(dir);
+  }
+
+  function setColFilter(key: string, values: Set<string>) {
+    setColFilters(prev => ({ ...prev, [key]: values }));
+  }
+
+  const colValues = useMemo(() => ({
+    authorHandle: Array.from(new Set(results.map(r => r.authorHandle ?? ""))).sort(),
+    language: Array.from(new Set(results.map(r => r.language ?? ""))).sort(),
+  }), [results]);
+
+  const displayed = useMemo(() => {
+    let list = [...results];
+    // Apply column filters
+    for (const [key, values] of Object.entries(colFilters)) {
+      if (values.size === 0) continue;
+      list = list.filter(r => values.has(String((r as any)[key] ?? "")));
+    }
+    // Sort
+    if (sortKey && sortDir) {
+      list.sort((a, b) => {
+        let av: any = (a as any)[sortKey];
+        let bv: any = (b as any)[sortKey];
+        if (av instanceof Date) av = av.getTime();
+        if (bv instanceof Date) bv = bv.getTime();
+        if (av == null) av = sortDir === "asc" ? Infinity : -Infinity;
+        if (bv == null) bv = sortDir === "asc" ? Infinity : -Infinity;
+        if (typeof av === "string") av = av.toLowerCase();
+        if (typeof bv === "string") bv = bv.toLowerCase();
+        if (av < bv) return sortDir === "asc" ? -1 : 1;
+        if (av > bv) return sortDir === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return list;
+  }, [results, sortKey, sortDir, colFilters]);
+
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/30">
-            <th className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">Author</th>
+            <th className="text-left px-3 py-2.5 whitespace-nowrap">
+              <ColumnHeader label="Author" sortKey="authorHandle" sortDir={sortKey==="authorHandle"?sortDir:null} onSort={handleSort} filterValues={colValues.authorHandle} selectedValues={colFilters.authorHandle??new Set()} onFilterChange={(v)=>setColFilter("authorHandle",v)} />
+            </th>
             <th className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground">Content</th>
-            <th className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">Date</th>
-            <th className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground">Lang</th>
-            <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground">Views</th>
-            <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground">Likes</th>
-            <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground">RT</th>
-            <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground">Replies</th>
-            <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground">QT</th>
-            <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground">Saves</th>
+            <th className="text-left px-3 py-2.5 whitespace-nowrap">
+              <ColumnHeader label="Date" sortKey="postedAt" sortDir={sortKey==="postedAt"?sortDir:null} onSort={handleSort} />
+            </th>
+            <th className="text-left px-3 py-2.5">
+              <ColumnHeader label="Lang" sortKey="language" sortDir={sortKey==="language"?sortDir:null} onSort={handleSort} filterValues={colValues.language} selectedValues={colFilters.language??new Set()} onFilterChange={(v)=>setColFilter("language",v)} />
+            </th>
+            <th className="text-right px-3 py-2.5">
+              <ColumnHeader label="Views" sortKey="views" sortDir={sortKey==="views"?sortDir:null} onSort={handleSort} />
+            </th>
+            <th className="text-right px-3 py-2.5">
+              <ColumnHeader label="Likes" sortKey="likes" sortDir={sortKey==="likes"?sortDir:null} onSort={handleSort} />
+            </th>
+            <th className="text-right px-3 py-2.5">
+              <ColumnHeader label="RT" sortKey="retweets" sortDir={sortKey==="retweets"?sortDir:null} onSort={handleSort} />
+            </th>
+            <th className="text-right px-3 py-2.5">
+              <ColumnHeader label="Replies" sortKey="replies" sortDir={sortKey==="replies"?sortDir:null} onSort={handleSort} />
+            </th>
+            <th className="text-right px-3 py-2.5">
+              <ColumnHeader label="QT" sortKey="quotes" sortDir={sortKey==="quotes"?sortDir:null} onSort={handleSort} />
+            </th>
+            <th className="text-right px-3 py-2.5">
+              <ColumnHeader label="Saves" sortKey="bookmarks" sortDir={sortKey==="bookmarks"?sortDir:null} onSort={handleSort} />
+            </th>
             <th className="px-3 py-2.5 text-xs font-semibold text-muted-foreground">Link</th>
           </tr>
         </thead>
         <tbody>
-          {results.map((r, i) => (
+          {displayed.map((r, i) => (
             <tr key={r.tweetId ?? i} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
               <td className="px-3 py-2.5">
                 <div className="font-medium text-foreground text-xs whitespace-nowrap">@{r.authorHandle}</div>

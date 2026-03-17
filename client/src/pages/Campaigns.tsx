@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { ColumnHeader, SortDir as ColSortDir } from "@/components/ColumnHeader";
 import { Link } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
@@ -344,6 +345,47 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
 
   const pendingCount = posts.filter(p => p.fetchStatus === "pending").length;
 
+  // ─── Column sort/filter ───────────────────────────────────────────────────
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<ColSortDir>(null);
+  const [colFilters, setColFilters] = useState<Record<string, Set<string>>>({});
+
+  function handleColSort(key: string, dir: ColSortDir) {
+    setSortKey(dir ? key : null);
+    setSortDir(dir);
+  }
+
+  function setColFilter(key: string, values: Set<string>) {
+    setColFilters(prev => ({ ...prev, [key]: values }));
+  }
+
+  const colValues = useMemo(() => ({
+    kolHandle: Array.from(new Set(posts.map(p => p.kolHandle ?? ""))).sort(),
+    fetchStatus: Array.from(new Set(posts.map(p => p.fetchStatus ?? ""))).sort(),
+  }), [posts]);
+
+  const displayedPosts = useMemo(() => {
+    let list = [...posts];
+    for (const [key, values] of Object.entries(colFilters)) {
+      if (values.size === 0) continue;
+      list = list.filter(p => values.has(String((p as any)[key] ?? "")));
+    }
+    if (sortKey && sortDir) {
+      list.sort((a, b) => {
+        let av: any = (a as any)[sortKey];
+        let bv: any = (b as any)[sortKey];
+        if (av == null) av = sortDir === "asc" ? Infinity : -Infinity;
+        if (bv == null) bv = sortDir === "asc" ? Infinity : -Infinity;
+        if (typeof av === "string") av = av.toLowerCase();
+        if (typeof bv === "string") bv = bv.toLowerCase();
+        if (av < bv) return sortDir === "asc" ? -1 : 1;
+        if (av > bv) return sortDir === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return list;
+  }, [posts, sortKey, sortDir, colFilters]);
+
   if (isLoading) {
     return (
       <DashboardLayout>
@@ -442,21 +484,21 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
             <Table>
               <TableHeader>
                 <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-muted-foreground">KOL</TableHead>
+                  <TableHead><ColumnHeader label="KOL" sortKey="kolHandle" sortDir={sortKey==="kolHandle"?sortDir:null} onSort={handleColSort} filterValues={colValues.kolHandle} selectedValues={colFilters.kolHandle??new Set()} onFilterChange={(v)=>setColFilter("kolHandle",v)} /></TableHead>
                   <TableHead className="text-muted-foreground">Tweet</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Views</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Likes</TableHead>
-                  <TableHead className="text-muted-foreground text-right">RT</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Replies</TableHead>
-                  <TableHead className="text-muted-foreground text-right">QT</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Saves</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Budget</TableHead>
-                  <TableHead className="text-muted-foreground text-center">Status</TableHead>
+                  <TableHead className="text-right"><ColumnHeader label="Views" sortKey="views" sortDir={sortKey==="views"?sortDir:null} onSort={handleColSort} /></TableHead>
+                  <TableHead className="text-right"><ColumnHeader label="Likes" sortKey="likes" sortDir={sortKey==="likes"?sortDir:null} onSort={handleColSort} /></TableHead>
+                  <TableHead className="text-right"><ColumnHeader label="RT" sortKey="retweets" sortDir={sortKey==="retweets"?sortDir:null} onSort={handleColSort} /></TableHead>
+                  <TableHead className="text-right"><ColumnHeader label="Replies" sortKey="replies" sortDir={sortKey==="replies"?sortDir:null} onSort={handleColSort} /></TableHead>
+                  <TableHead className="text-right"><ColumnHeader label="QT" sortKey="quotes" sortDir={sortKey==="quotes"?sortDir:null} onSort={handleColSort} /></TableHead>
+                  <TableHead className="text-right"><ColumnHeader label="Saves" sortKey="bookmarks" sortDir={sortKey==="bookmarks"?sortDir:null} onSort={handleColSort} /></TableHead>
+                  <TableHead className="text-right"><ColumnHeader label="Budget" sortKey="budget" sortDir={sortKey==="budget"?sortDir:null} onSort={handleColSort} /></TableHead>
+                  <TableHead className="text-center"><ColumnHeader label="Status" sortKey="fetchStatus" sortDir={sortKey==="fetchStatus"?sortDir:null} onSort={handleColSort} filterValues={colValues.fetchStatus} selectedValues={colFilters.fetchStatus??new Set()} onFilterChange={(v)=>setColFilter("fetchStatus",v)} /></TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {posts.map(post => (
+                {displayedPosts.map(post => (
                   <TableRow key={post.id} className="border-border hover:bg-secondary/30">
                     <TableCell className="font-mono text-sm text-foreground">
                       {post.kolHandle ? (

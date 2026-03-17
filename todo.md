@@ -165,5 +165,11 @@
 - [x] Recalculate all avg metrics from campaign posts using correct formula
 
 ## Reports Re-run
-- [ ] Server: report.rerun procedure — re-fetches metrics for all tweet IDs in a saved report via twitterapi.io
-- [ ] UI: Re-run button on saved report detail view
+- [x] Server: report.rerun procedure — re-fetches metrics for all tweet IDs in a saved report via twitterapi.io
+- [x] UI: Re-run button on saved report detail view
+
+## Column Sort & Filter
+- [ ] Reusable ColumnHeader component: A→Z, Z→A sort, keyword filter input, checkbox value selection
+- [ ] Apply to KOL Database table
+- [ ] Apply to Reports results table
+- [ ] Apply to Campaigns detail table
