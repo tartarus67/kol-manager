@@ -402,18 +402,16 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
               <UploadIcon className="w-3.5 h-3.5 mr-1.5" />
               Import URLs
             </Button>
-            {pendingCount > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => fetchMetricsMutation.mutate({ campaignId: id })}
-                disabled={fetchMetricsMutation.isPending}
-                className="border-border text-foreground hover:bg-secondary"
-              >
-                <RefreshCwIcon className={`w-3.5 h-3.5 mr-1.5 ${fetchMetricsMutation.isPending ? "animate-spin" : ""}`} />
-                {fetchMetricsMutation.isPending ? "Fetching..." : `Fetch Metrics (${pendingCount})`}
-              </Button>
-            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => fetchMetricsMutation.mutate({ campaignId: id })}
+              disabled={fetchMetricsMutation.isPending}
+              className="border-border text-foreground hover:bg-secondary"
+            >
+              <RefreshCwIcon className={`w-3.5 h-3.5 mr-1.5 ${fetchMetricsMutation.isPending ? "animate-spin" : ""}`} />
+              {fetchMetricsMutation.isPending ? "Refreshing..." : "Refresh Metrics"}
+            </Button>
           </div>
         </div>
 

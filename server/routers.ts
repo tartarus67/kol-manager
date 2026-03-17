@@ -279,7 +279,59 @@ const kolRouter = router({
       if (!apiKey) {
         return { success: false, reason: "TWITTERAPI_IO_KEY_MISSING", message: "twitterapi.io API key not configured. Add twitterapi_io_key to your secrets to enable enrichment." };
       }
-      return enrichSingleKol(kol.id, kol.handle, apiKey);
+      // Enrich profile data
+      const result = await enrichSingleKol(kol.id, kol.handle, apiKey);
+      // Also re-fetch campaign post metrics for this KOL
+      try {
+        const posts = await getKolCampaignPosts(kol.id);
+        const toFetch = posts.filter(p => p.tweetId);
+        for (const post of toFetch) {
+          try {
+            let tweet: any = null;
+            if (post.kolHandle) {
+              const sinceId = String(Number(post.tweetId!) - 1);
+              const q = encodeURIComponent(`from:${post.kolHandle} since_id:${sinceId} max_id:${post.tweetId}`);
+              const res = await fetchWithRetry(
+                `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${q}&queryType=Latest&count=1`,
+                { headers: { "X-API-Key": apiKey } }
+              );
+              if (res.ok) {
+                const json = await res.json() as any;
+                tweet = json?.tweets?.find((t: any) => String(t.id) === String(post.tweetId))
+                  ?? (json?.tweets?.length === 1 ? json.tweets[0] : null);
+              }
+            }
+            if (!tweet) {
+              const q2 = encodeURIComponent(`url:${post.tweetId}`);
+              const res2 = await fetchWithRetry(
+                `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${q2}&queryType=Latest&count=1`,
+                { headers: { "X-API-Key": apiKey } }
+              );
+              if (res2.ok) {
+                const j2 = await res2.json() as any;
+                tweet = j2?.tweets?.find((t: any) => String(t.id) === String(post.tweetId))
+                  ?? (j2?.tweets?.length > 0 ? j2.tweets[0] : null);
+              }
+            }
+            if (tweet) {
+              await updateCampaignPost(post.id, {
+                likes: tweet.likeCount ?? 0,
+                retweets: tweet.retweetCount ?? 0,
+                replies: tweet.replyCount ?? 0,
+                quotes: tweet.quoteCount ?? 0,
+                views: tweet.viewCount ?? null,
+                bookmarks: tweet.bookmarkCount ?? null,
+                tweetText: tweet.text ?? null,
+                fetchStatus: "done",
+                fetchError: null,
+                fetchedAt: new Date(),
+              });
+            }
+          } catch { /* skip individual post failures */ }
+        }
+        await recalcKolMetrics(kol.id);
+      } catch { /* don't fail enrichment if post re-fetch fails */ }
+      return result;
     }),
 
   enrichBulk: protectedProcedure
