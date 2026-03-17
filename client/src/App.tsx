@@ -9,6 +9,7 @@ import KolList from "./pages/KolList";
 import KolDetail from "./pages/KolDetail";
 import Folders from "./pages/Folders";
 import Reports from "./pages/Reports";
+import Campaigns from "./pages/Campaigns";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -19,6 +20,7 @@ function Router() {
       <Route path="/kols/:id" component={KolDetail} />
       <Route path="/folders" component={Folders} />
       <Route path="/reports" component={Reports} />
+      <Route path="/campaigns" component={Campaigns} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

@@ -34,6 +34,16 @@ import {
   getReportResults,
   logApiUsage,
   getApiUsageStats,
+  listCampaigns,
+  getCampaignById,
+  createCampaign,
+  updateCampaign,
+  deleteCampaign,
+  getCampaignPosts,
+  getKolCampaignPosts,
+  insertCampaignPost,
+  updateCampaignPost,
+  deleteCampaignPost,
 } from "./db";
 import { parseCSV } from "./csvIntake";
 import { ENV } from "./_core/env";
@@ -637,6 +647,181 @@ const usageRouter = router({
   getStats: protectedProcedure.query(() => getApiUsageStats()),
 });
 
+// ─── Campaign router ─────────────────────────────────────────────────────────
+
+/** Extract tweet ID from a tweet URL like https://x.com/user/status/12345 */
+function parseTweetId(url: string): string | null {
+  const m = url.match(/\/status\/([0-9]+)/);
+  return m ? m[1] : null;
+}
+
+/** Extract handle from a tweet URL */
+function parseTweetHandle(url: string): string | null {
+  try {
+    const u = new URL(url.startsWith("http") ? url : `https://${url}`);
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts.length >= 1) return parts[0].toLowerCase();
+  } catch { /* ignore */ }
+  return null;
+}
+
+const campaignRouter = router({
+  list: protectedProcedure.query(() => listCampaigns()),
+
+  getById: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const campaign = await getCampaignById(input.id);
+      const posts = campaign ? await getCampaignPosts(input.id) : [];
+      return { campaign, posts };
+    }),
+
+  create: protectedProcedure
+    .input(z.object({
+      name: z.string().min(1),
+      description: z.string().optional(),
+      budget: z.number().optional(),
+      status: z.enum(["active", "completed", "draft"]).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const id = await createCampaign({
+        name: input.name,
+        description: input.description,
+        budget: input.budget != null ? String(input.budget) : undefined,
+        status: input.status ?? "active",
+      });
+      return { id };
+    }),
+
+  update: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      name: z.string().optional(),
+      description: z.string().optional(),
+      budget: z.number().nullable().optional(),
+      status: z.enum(["active", "completed", "draft"]).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const { id, budget, ...rest } = input;
+      const data: any = { ...rest };
+      if (budget !== undefined) data.budget = budget != null ? String(budget) : null;
+      await updateCampaign(id, data);
+      return { success: true };
+    }),
+
+  delete: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await deleteCampaign(input.id);
+      return { success: true };
+    }),
+
+  // Import a batch of tweet URLs, optionally with per-post budgets
+  importUrls: protectedProcedure
+    .input(z.object({
+      campaignId: z.number(),
+      urls: z.array(z.object({
+        url: z.string().min(1),
+        budget: z.number().optional(),
+      })).min(1),
+    }))
+    .mutation(async ({ input }) => {
+      const inserted: number[] = [];
+      for (const item of input.urls) {
+        const tweetId = parseTweetId(item.url);
+        const kolHandle = parseTweetHandle(item.url);
+        const id = await insertCampaignPost({
+          campaignId: input.campaignId,
+          tweetUrl: item.url,
+          tweetId: tweetId ?? undefined,
+          kolHandle: kolHandle ?? undefined,
+          budget: item.budget != null ? String(item.budget) : undefined,
+          fetchStatus: "pending",
+        });
+        inserted.push(id);
+      }
+      return { inserted: inserted.length };
+    }),
+
+  // Fetch metrics for all pending posts in a campaign from twitterapi.io
+  fetchMetrics: protectedProcedure
+    .input(z.object({ campaignId: z.number() }))
+    .mutation(async ({ input }) => {
+      const posts = await getCampaignPosts(input.campaignId);
+      const pending = posts.filter(p => p.fetchStatus === "pending" && p.tweetId);
+      let done = 0;
+      let failed = 0;
+      const apiKey = ENV.twitterApiIoKey;
+      if (!apiKey) throw new Error("twitterapi_io_key not configured");
+
+      for (const post of pending) {
+        try {
+          const res = await fetchWithRetry(
+            `https://api.twitterapi.io/twitter/tweets?tweet_ids=${post.tweetId}`,
+            { headers: { "X-API-Key": apiKey } }
+          );
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const json = await res.json() as any;
+          const tweet = json?.tweets?.[0] ?? json?.data?.[0];
+          if (!tweet) throw new Error("No tweet in response");
+
+          const metrics = tweet.public_metrics ?? tweet;
+          const updates: any = {
+            likes: metrics.like_count ?? metrics.likes ?? 0,
+            retweets: metrics.retweet_count ?? metrics.retweets ?? 0,
+            replies: metrics.reply_count ?? metrics.replies ?? 0,
+            quotes: metrics.quote_count ?? metrics.quotes ?? 0,
+            views: tweet.viewCount ?? tweet.view_count ?? metrics.impression_count ?? null,
+            bookmarks: metrics.bookmark_count ?? metrics.bookmarks ?? null,
+            tweetText: tweet.text ?? tweet.full_text ?? null,
+            fetchStatus: "done" as const,
+            fetchedAt: new Date(),
+          };
+
+          // Try to match KOL by handle
+          if (post.kolHandle) {
+            const kolRows = await (await import("./db")).listKols(post.kolHandle);
+            const matched = kolRows.find((k: any) => k.handle?.toLowerCase() === post.kolHandle?.toLowerCase());
+            if (matched) updates.kolId = matched.id;
+          }
+
+          await updateCampaignPost(post.id, updates);
+          await logApiUsage({ operation: "campaign_fetch", itemCount: 1, context: `campaign:${input.campaignId}` });
+          done++;
+        } catch (err: any) {
+          await updateCampaignPost(post.id, { fetchStatus: "failed", fetchError: String(err?.message ?? err) });
+          failed++;
+        }
+      }
+      return { done, failed, total: pending.length };
+    }),
+
+  updatePost: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      budget: z.number().nullable().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const { id, budget } = input;
+      const data: any = {};
+      if (budget !== undefined) data.budget = budget != null ? String(budget) : null;
+      await updateCampaignPost(id, data);
+      return { success: true };
+    }),
+
+  deletePost: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await deleteCampaignPost(input.id);
+      return { success: true };
+    }),
+
+  // Get all campaign posts for a specific KOL (for KOL profile page)
+  getKolPosts: protectedProcedure
+    .input(z.object({ kolId: z.number() }))
+    .query(({ input }) => getKolCampaignPosts(input.kolId)),
+});
+
 // ─── App router ───────────────────────────────────────────────────────────────
 
 export const appRouter = router({
@@ -653,6 +838,7 @@ export const appRouter = router({
   folder: folderRouter,
   report: reportRouter,
   usage: usageRouter,
+  campaign: campaignRouter,
 });
 
 export type AppRouter = typeof appRouter;

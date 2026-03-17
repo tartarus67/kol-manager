@@ -296,6 +296,41 @@ export default function KolList() {
 
   const [bulkFolderTarget, setBulkFolderTarget] = useState<number | null>(null);
 
+  // ─── Single KOL Edit state ──────────────────────────────────────────────────
+  const [singleEditKol, setSingleEditKol] = useState<null | { id: number; handle: string; displayName: string; profileUrl: string; followers: number | null }>(null);
+  const [singleEditHandle, setSingleEditHandle] = useState("");
+  const [singleEditName, setSingleEditName] = useState("");
+  const [singleEditUrl, setSingleEditUrl] = useState("");
+  const [singleEditFollowers, setSingleEditFollowers] = useState("");
+
+  const singleEditMutation = trpc.kol.update.useMutation({
+    onSuccess: () => {
+      utils.kol.list.invalidate();
+      toast.success("KOL updated");
+      setSingleEditKol(null);
+    },
+    onError: () => toast.error("Failed to update KOL"),
+  });
+
+  function openSingleEdit(kol: any) {
+    setSingleEditKol({ id: kol.id, handle: kol.handle, displayName: kol.displayName ?? "", profileUrl: kol.profileUrl ?? "", followers: kol.followers ?? null });
+    setSingleEditHandle(kol.handle ?? "");
+    setSingleEditName(kol.displayName ?? "");
+    setSingleEditUrl(kol.profileUrl ?? "");
+    setSingleEditFollowers(kol.followers != null ? String(kol.followers) : "");
+  }
+
+  function handleSingleEditSave() {
+    if (!singleEditKol) return;
+    const data: any = {};
+    if (singleEditHandle.trim()) data.handle = singleEditHandle.trim().replace(/^@/, "");
+    if (singleEditName.trim()) data.displayName = singleEditName.trim();
+    if (singleEditUrl.trim()) data.profileUrl = singleEditUrl.trim();
+    const parsedFollowers = singleEditFollowers.trim() ? parseInt(singleEditFollowers.trim(), 10) : undefined;
+    if (parsedFollowers !== undefined && !isNaN(parsedFollowers)) data.followers = parsedFollowers;
+    singleEditMutation.mutate({ id: singleEditKol.id, data });
+  }
+
   // ─── Bulk Edit state ───────────────────────────────────────────────────────
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkEditRegion, setBulkEditRegion] = useState("");
@@ -562,6 +597,13 @@ export default function KolList() {
                             title="View"
                           >
                             <Eye className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => openSingleEdit(kol)}
+                            className="p-1.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"
+                            title="Edit"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
                           </button>
                           <button
                             onClick={() => setDeleteId(kol.id)}
@@ -888,7 +930,64 @@ export default function KolList() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Bulk Delete ───────────────────────────────────────────────────────────────────────────── */}
+      {/* ── Single KOL Edit ────────────────────────────────────────────────────────────────────────────────────────────────────── */}
+      <Dialog open={!!singleEditKol} onOpenChange={open => !open && setSingleEditKol(null)}>
+        <DialogContent className="bg-card border-border text-foreground max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit @{singleEditKol?.handle}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Twitter Handle</label>
+              <Input
+                placeholder="e.g. elonmusk (without @)"
+                value={singleEditHandle}
+                onChange={e => setSingleEditHandle(e.target.value.replace(/^@/, ""))}
+                className="bg-secondary border-border text-foreground text-sm h-8"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Display Name</label>
+              <Input
+                placeholder="e.g. Elon Musk"
+                value={singleEditName}
+                onChange={e => setSingleEditName(e.target.value)}
+                className="bg-secondary border-border text-foreground text-sm h-8"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Profile URL</label>
+              <Input
+                placeholder="https://x.com/handle"
+                value={singleEditUrl}
+                onChange={e => setSingleEditUrl(e.target.value)}
+                className="bg-secondary border-border text-foreground text-sm h-8"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Followers</label>
+              <Input
+                placeholder="e.g. 12500"
+                type="number"
+                value={singleEditFollowers}
+                onChange={e => setSingleEditFollowers(e.target.value)}
+                className="bg-secondary border-border text-foreground text-sm h-8"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSingleEditKol(null)} className="border-border text-foreground hover:bg-secondary">Cancel</Button>
+            <Button
+              onClick={handleSingleEditSave}
+              disabled={singleEditMutation.isPending}
+              className="bg-primary text-primary-foreground hover:bg-primary/90">
+              {singleEditMutation.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Bulk Delete ────────────────────────────────────────────────────────────────────────────────────────────────────── */}
       <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
         <AlertDialogContent className="bg-card border-border text-foreground">
           <AlertDialogHeader>

@@ -265,3 +265,52 @@ export const apiUsage = mysqlTable("api_usage", {
 
 export type ApiUsage = typeof apiUsage.$inferSelect;
 export type InsertApiUsage = typeof apiUsage.$inferInsert;
+
+// ─── Campaigns ───────────────────────────────────────────────────────────────
+
+export const campaigns = mysqlTable("campaigns", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 256 }).notNull(),
+  description: text("description"),
+  // Total budget for the campaign in USD (editable)
+  budget: decimal("budget", { precision: 12, scale: 2 }),
+  status: mysqlEnum("status", ["active", "completed", "draft"]).default("active").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type Campaign = typeof campaigns.$inferSelect;
+export type InsertCampaign = typeof campaigns.$inferInsert;
+
+// ─── Campaign Posts ───────────────────────────────────────────────────────────
+// Each row = one tweet URL imported into a campaign
+
+export const campaignPosts = mysqlTable("campaign_posts", {
+  id: int("id").autoincrement().primaryKey(),
+  campaignId: int("campaignId").notNull(),
+  // KOL id (nullable — auto-matched by handle, or left null if unmatched)
+  kolId: int("kolId"),
+  // Original tweet URL as entered by user
+  tweetUrl: varchar("tweetUrl", { length: 512 }).notNull(),
+  // Parsed tweet ID for API calls
+  tweetId: varchar("tweetId", { length: 32 }),
+  // KOL handle extracted from URL
+  kolHandle: varchar("kolHandle", { length: 64 }),
+  // Per-post budget in USD (editable)
+  budget: decimal("budget", { precision: 12, scale: 2 }),
+  // Metrics fetched from twitterapi.io
+  likes: int("likes"),
+  retweets: int("retweets"),
+  replies: int("replies"),
+  quotes: int("quotes"),
+  views: bigint("views", { mode: "number" }),
+  bookmarks: int("bookmarks"),
+  // Raw tweet text (for display)
+  tweetText: text("tweetText"),
+  // Fetch status
+  fetchStatus: mysqlEnum("fetchStatus", ["pending", "done", "failed"]).default("pending").notNull(),
+  fetchError: text("fetchError"),
+  fetchedAt: timestamp("fetchedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CampaignPost = typeof campaignPosts.$inferSelect;
+export type InsertCampaignPost = typeof campaignPosts.$inferInsert;

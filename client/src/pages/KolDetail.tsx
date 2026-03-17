@@ -12,7 +12,7 @@ import {
 import { trpc } from "@/lib/trpc";
 import {
   ArrowLeft, Edit2, ExternalLink, Users, TrendingUp, BarChart2,
-  Star, Tag, MapPin, DollarSign, FileText, Zap, BadgeCheck, Globe, Calendar, Heart, Repeat2, MessageCircle,
+  Star, Tag, MapPin, DollarSign, FileText, Zap, BadgeCheck, Globe, Calendar, Heart, Repeat2, MessageCircle, Megaphone,
 } from "lucide-react";
 import { useState } from "react";
 import { useLocation, useParams } from "wouter";
@@ -262,7 +262,10 @@ export default function KolDetail() {
           </InfoSection>
         </div>
 
-        {/* Posts Table */}
+        {/* Campaign Post History */}
+        <CampaignPostHistory kolId={kolId} />
+
+        {/* Posts Table (imported CSV posts) */}
         {posts.length > 0 && (
           <div className="space-y-3">
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
@@ -448,6 +451,111 @@ function EditField({ label, value, onChange, type = "text" }: {
         onChange={e => onChange(e.target.value)}
         className="bg-secondary border-border text-foreground placeholder:text-muted-foreground"
       />
+    </div>
+  );
+}
+
+// ─── Campaign Post History ────────────────────────────────────────────────────
+
+function fmtN(n: number | bigint | null | undefined): string {
+  if (n == null) return "—";
+  const num = typeof n === "bigint" ? Number(n) : n;
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+  return String(num);
+}
+
+function fmtBudget(v: string | number | null | undefined): string {
+  if (v == null) return "—";
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  return isNaN(n) ? "—" : `$${n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+function CampaignPostHistory({ kolId }: { kolId: number }) {
+  const { data: campaignPosts = [], isLoading } = trpc.campaign.getKolPosts.useQuery(
+    { kolId },
+    { enabled: !isNaN(kolId) }
+  );
+
+  if (isLoading) return null;
+  if (campaignPosts.length === 0) return null;
+
+  const totalViews = campaignPosts.reduce((s, p) => s + (p.views ? Number(p.views) : 0), 0);
+  const totalLikes = campaignPosts.reduce((s, p) => s + (p.likes ?? 0), 0);
+  const totalRt = campaignPosts.reduce((s, p) => s + (p.retweets ?? 0), 0);
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+        <Megaphone className="h-4 w-4" />
+        Aethir Campaign Posts ({campaignPosts.length})
+      </h2>
+
+      {/* Summary row */}
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: "Total Views", value: fmtN(totalViews) },
+          { label: "Total Likes", value: fmtN(totalLikes) },
+          { label: "Total Retweets", value: fmtN(totalRt) },
+        ].map(s => (
+          <div key={s.label} className="bg-card border border-border rounded-lg p-3 text-center">
+            <div className="text-lg font-bold text-foreground">{s.value}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-lg border border-border overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border bg-secondary/50">
+                {["Campaign", "Tweet", "Views", "Likes", "RT", "Replies", "QT", "Saves", "Budget", "Status"].map(h => (
+                  <th key={h} className="px-3 py-2.5 text-left font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {campaignPosts.map(post => (
+                <tr key={post.id} className="border-b border-border/50 hover:bg-secondary/20 transition-colors">
+                  <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap max-w-[120px]">
+                    <span className="truncate block">{(post as any).campaignName || "—"}</span>
+                  </td>
+                  <td className="px-3 py-2.5 max-w-[200px]">
+                    <a
+                      href={post.tweetUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-400 hover:underline flex items-center gap-1 truncate"
+                    >
+                      {post.tweetText ? post.tweetText.slice(0, 50) + (post.tweetText.length > 50 ? "…" : "") : post.tweetUrl.slice(0, 35) + "…"}
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                  </td>
+                  <td className="px-3 py-2.5 font-mono text-foreground">{fmtN(post.views)}</td>
+                  <td className="px-3 py-2.5 font-mono text-foreground">{fmtN(post.likes)}</td>
+                  <td className="px-3 py-2.5 font-mono text-foreground">{fmtN(post.retweets)}</td>
+                  <td className="px-3 py-2.5 font-mono text-foreground">{fmtN(post.replies)}</td>
+                  <td className="px-3 py-2.5 font-mono text-foreground">{fmtN(post.quotes)}</td>
+                  <td className="px-3 py-2.5 font-mono text-foreground">{fmtN(post.bookmarks)}</td>
+                  <td className="px-3 py-2.5 font-mono text-foreground">{fmtBudget(post.budget)}</td>
+                  <td className="px-3 py-2.5">
+                    <span className={`px-1.5 py-0.5 rounded text-xs ${
+                      post.fetchStatus === "done" ? "bg-green-500/20 text-green-400" :
+                      post.fetchStatus === "failed" ? "bg-red-500/20 text-red-400" :
+                      "bg-yellow-500/20 text-yellow-400"
+                    }`}>
+                      {post.fetchStatus}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

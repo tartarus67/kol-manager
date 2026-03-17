@@ -4,8 +4,11 @@ import {
   InsertUser, users,
   kols, kolPosts, folders, kolFolders,
   reports, reportResults, apiUsage,
+  campaigns, campaignPosts,
   InsertKol, InsertKolPost, InsertFolder, InsertReport, InsertReportResult,
+  InsertCampaign, InsertCampaignPost,
   Kol, KolPost, Folder, KolFolder, Report, ReportResult, ApiUsage,
+  Campaign, CampaignPost,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -457,4 +460,77 @@ export async function getApiUsageStats(): Promise<{
   const recentUsage = rows.slice(-20).reverse();
 
   return { totalCredits, totalCostUsd, byOperation, recentUsage };
+}
+
+// ─── Campaign helpers ─────────────────────────────────────────────────────────
+
+export async function listCampaigns(): Promise<Campaign[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(campaigns).orderBy(campaigns.createdAt);
+}
+
+export async function getCampaignById(id: number): Promise<Campaign | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(campaigns).where(eq(campaigns.id, id));
+  return rows[0] ?? null;
+}
+
+export async function createCampaign(data: InsertCampaign): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  const result = await db.insert(campaigns).values(data);
+  return (result[0] as any).insertId as number;
+}
+
+export async function updateCampaign(id: number, data: Partial<InsertCampaign>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(campaigns).set(data).where(eq(campaigns.id, id));
+}
+
+export async function deleteCampaign(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(campaignPosts).where(eq(campaignPosts.campaignId, id));
+  await db.delete(campaigns).where(eq(campaigns.id, id));
+}
+
+// ─── Campaign post helpers ────────────────────────────────────────────────────
+
+export async function getCampaignPosts(campaignId: number): Promise<CampaignPost[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(campaignPosts).where(eq(campaignPosts.campaignId, campaignId));
+}
+
+export async function getKolCampaignPosts(kolId: number): Promise<(CampaignPost & { campaignName: string })[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({ post: campaignPosts, campaignName: campaigns.name })
+    .from(campaignPosts)
+    .leftJoin(campaigns, eq(campaignPosts.campaignId, campaigns.id))
+    .where(eq(campaignPosts.kolId, kolId));
+  return rows.map(r => ({ ...r.post, campaignName: r.campaignName ?? "" }));
+}
+
+export async function insertCampaignPost(data: InsertCampaignPost): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  const result = await db.insert(campaignPosts).values(data);
+  return (result[0] as any).insertId as number;
+}
+
+export async function updateCampaignPost(id: number, data: Partial<InsertCampaignPost>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(campaignPosts).set(data).where(eq(campaignPosts.id, id));
+}
+
+export async function deleteCampaignPost(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(campaignPosts).where(eq(campaignPosts.id, id));
 }

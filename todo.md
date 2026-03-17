@@ -134,3 +134,17 @@
 - [x] Add api_usage DB table to log credits consumed per operation
 - [x] Server: log credits after each twitterapi.io call (search, enrich)
 - [x] UI: Cost tracker widget on Dashboard showing total spend + breakdown
+
+## KOL Edit & Campaigns Feature
+- [x] Single KOL edit modal: add handle, display name, profile URL fields
+- [x] Schema: campaigns table (name, description, budget, createdAt)
+- [x] Schema: campaign_posts table (campaignId, kolId, tweetUrl, tweetId, budget, likes, retweets, replies, quotes, views, bookmarks, fetchedAt)
+- [x] Server: campaign CRUD (create, list, get, delete)
+- [x] Server: import post URLs into campaign (parse tweet ID, fetch metrics via twitterapi.io, link to KOL)
+- [x] Server: refresh post metrics (re-fetch from twitterapi.io)
+- [x] Server: edit budget on campaign_post
+- [x] Campaigns page: list all campaigns with total budget + post count
+- [x] Campaigns page: create campaign modal
+- [x] Campaigns page: campaign detail view with post URL import, posts table, budget editing
+- [x] KOL profile page: show campaign post history with engagement metrics
+- [x] Add Campaigns to sidebar navigation
