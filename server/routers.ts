@@ -552,8 +552,16 @@ const reportRouter = router({
 
         if (!res.ok) {
           const body = await res.text();
+          let errMsg = `twitterapi.io error (${res.status}): ${body.slice(0, 300)}`;
+          if (res.status === 402 || body.includes("Credits is not enough")) {
+            errMsg = "Your twitterapi.io account is out of credits. Please recharge at https://twitterapi.io to continue generating reports.";
+          } else if (res.status === 401) {
+            errMsg = "Invalid twitterapi.io API key. Please check your API key in the project secrets.";
+          } else if (res.status === 429) {
+            errMsg = "twitterapi.io rate limit reached. Please wait a moment and try again.";
+          }
           if (collected.length === 0) {
-            return { success: false, reason: `TWITTERAPI_IO_ERROR_${res.status}`, message: `twitterapi.io error: ${body.slice(0, 300)}`, results: [] };
+            return { success: false, reason: `TWITTERAPI_IO_ERROR_${res.status}`, message: errMsg, results: [] };
           }
           break; // partial results — stop paginating
         }
