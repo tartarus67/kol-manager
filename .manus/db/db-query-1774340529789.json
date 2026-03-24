@@ -1,0 +1,9 @@
+{
+  "query": "\n-- Create saved_searches table if not exists\nCREATE TABLE IF NOT EXISTS `saved_searches` (\n  `id` int NOT NULL AUTO_INCREMENT,\n  `name` varchar(128) NOT NULL,\n  `keywords` text NOT NULL,\n  `keywordMode` enum('AND','OR') NOT NULL DEFAULT 'OR',\n  `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  PRIMARY KEY (`id`)\n);\n\n-- Add new columns to kols table if they don't exist\nALTER TABLE `kols`\n  ADD COLUMN IF NOT EXISTS `avgViews` decimal(14,2) DEFAULT NULL,\n  ADD COLUMN IF NOT EXISTS `totalCampaignPosts` int DEFAULT 0,\n  ADD COLUMN IF NOT EXISTS `totalKolPosts` int DEFAULT 0;\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user s8wnVbZA4yzfrg7.8ebc791ac56d --database DZjTmaPHn9nCzaD9AuvmrW --execute \n-- Create saved_searches table if not exists\nCREATE TABLE IF NOT EXISTS `saved_searches` (\n  `id` int NOT NULL AUTO_INCREMENT,\n  `name` varchar(128) NOT NULL,\n  `keywords` text NOT NULL,\n  `keywordMode` enum('AND','OR') NOT NULL DEFAULT 'OR',\n  `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  PRIMARY KEY (`id`)\n);\n\n-- Add new columns to kols table if they don't exist\nALTER TABLE `kols`\n  ADD COLUMN IF NOT EXISTS `avgViews` decimal(14,2) DEFAULT NULL,\n  ADD COLUMN IF NOT EXISTS `totalCampaignPosts` int DEFAULT 0,\n  ADD COLUMN IF NOT EXISTS `totalKolPosts` int DEFAULT 0;\n",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 88
+}

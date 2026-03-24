@@ -582,15 +582,24 @@ export async function recalcKolMetrics(kolId: number): Promise<void> {
   const kolPostsRows = await db.select().from(kolPosts).where(eq(kolPosts.kolId, kolId));
   const totalKolPosts = kolPostsRows.length;
 
-  const setData: any = { totalCampaignPosts, totalKolPosts };
+  const setData: any = {};
   if (avgLikes != null) setData.avgLikes = avgLikes;
   if (avgRetweets != null) setData.avgRetweets = avgRetweets;
   if (avgReplies != null) setData.avgReplies = avgReplies;
   if (avgImpressions != null) setData.avgImpressions = avgImpressions;
-  if (avgViews != null) setData.avgViews = avgViews;
   if (avgEngagement != null) setData.avgEngagement = avgEngagement;
   if (engagementRate != null) setData.engagementRate = engagementRate;
-  await db.update(kols).set(setData).where(eq(kols.id, kolId));
+  // New columns (may not exist in older DB deployments)
+  try {
+    const extData: any = { ...setData, totalCampaignPosts, totalKolPosts };
+    if (avgViews != null) extData.avgViews = avgViews;
+    await db.update(kols).set(extData).where(eq(kols.id, kolId));
+  } catch {
+    // Fallback: update without new columns
+    if (Object.keys(setData).length > 0) {
+      await db.update(kols).set(setData).where(eq(kols.id, kolId));
+    }
+  }
 }
 
 /**
@@ -762,7 +771,11 @@ export async function syncTweetMetricsEverywhere(
 export async function listSavedSearches(): Promise<SavedSearch[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(savedSearches).orderBy(savedSearches.createdAt);
+  try {
+    return await db.select().from(savedSearches).orderBy(savedSearches.createdAt);
+  } catch {
+    return []; // table may not exist yet in production
+  }
 }
 
 export async function createSavedSearch(data: InsertSavedSearch): Promise<number> {
