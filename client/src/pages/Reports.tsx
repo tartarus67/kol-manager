@@ -1069,13 +1069,13 @@ export default function Reports() {
 
       {/* Missing KOL Modal */}
       <Dialog open={showMissingKolModal} onOpenChange={setShowMissingKolModal}>
-        <DialogContent className="bg-card border-border max-w-lg">
-          <DialogHeader>
+        <DialogContent className="bg-card border-border max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="text-foreground">
               {missingHandles.length} New KOL{missingHandles.length > 1 ? 's' : ''} Detected
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-2 overflow-y-auto flex-1 min-h-0 pr-1">
             <p className="text-sm text-muted-foreground">
               These handles appeared in your search results but aren't in your KOL database yet.
               Select which ones to add:
@@ -1144,7 +1144,7 @@ export default function Reports() {
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 pt-2 border-t border-border">
             <Button variant="ghost" onClick={() => setShowMissingKolModal(false)}>Skip</Button>
             <Button
               disabled={selectedMissingHandles.size === 0 || creatingMissingKols}

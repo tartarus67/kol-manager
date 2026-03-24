@@ -680,11 +680,11 @@ export default function KolList() {
 
       {/* ── Add KOLs Modal (handle / URL import) ─────────────────────────────── */}
       <Dialog open={importMode === "handles"} onOpenChange={open => !open && setImportMode(null)}>
-        <DialogContent className="bg-card border-border text-foreground max-w-lg">
-          <DialogHeader>
+        <DialogContent className="bg-card border-border text-foreground max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Add KOLs</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 overflow-y-auto flex-1 min-h-0 pr-1">
             <p className="text-sm text-muted-foreground">
               Paste X handles or profile URLs — one per line, or upload a CSV.
               Accepts: <code className="text-primary text-xs">@handle</code>, <code className="text-primary text-xs">handle</code>, or <code className="text-primary text-xs">https://x.com/handle</code>.
@@ -692,7 +692,7 @@ export default function KolList() {
             </p>
 
             <textarea
-              className="w-full h-32 bg-secondary border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full h-36 max-h-48 overflow-y-auto bg-secondary border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder={"@elonmusk\nhttps://x.com/VitalikButerin\ncz_binance"}
               value={handleText}
               onChange={e => handleHandleTextChange(e.target.value)}
@@ -766,7 +766,7 @@ export default function KolList() {
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 pt-2 border-t border-border">
             <Button variant="outline" onClick={() => { setImportMode(null); setHandleText(""); setHandlePreview(null); }}
               className="border-border text-foreground hover:bg-secondary">
               Cancel
@@ -784,11 +784,11 @@ export default function KolList() {
 
       {/* ── Campaign CSV Import Modal ─────────────────────────────────────────── */}
       <Dialog open={importMode === "csv"} onOpenChange={open => !open && setImportMode(null)}>
-        <DialogContent className="bg-card border-border text-foreground max-w-lg">
-          <DialogHeader>
+        <DialogContent className="bg-card border-border text-foreground max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Import Campaign CSV</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 overflow-y-auto flex-1 min-h-0 pr-1">
             <p className="text-sm text-muted-foreground">
               Supports Cookie3 aggregate exports (Nova/Turkish) and campaign post-tracker formats (India/Korea).
               Format is auto-detected. Existing KOLs are not duplicated — new posts are appended to their record.
@@ -837,7 +837,7 @@ export default function KolList() {
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 pt-2 border-t border-border">
             <Button variant="outline" onClick={() => { setImportMode(null); setCsvText(""); setPreviewData(null); }}
               className="border-border text-foreground hover:bg-secondary">
               Cancel

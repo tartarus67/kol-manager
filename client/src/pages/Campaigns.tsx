@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { ColumnHeader, SortDir as ColSortDir } from "@/components/ColumnHeader";
 import { Link } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -25,7 +25,7 @@ import { toast } from "sonner";
 import {
   PlusIcon, Trash2Icon, RefreshCwIcon, ExternalLinkIcon,
   PencilIcon, UploadIcon, ChevronRightIcon, DollarSignIcon,
-  CheckSquare, Square, Download,
+  CheckSquare, Square, Download, Paperclip,
 } from "lucide-react";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -286,6 +286,19 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const [importBudget, setImportBudget] = useState("");
+  const importFileRef = useRef<HTMLInputElement>(null);
+  function handleImportFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      setImportText(lines.join("\n"));
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
 
   const importMutation = trpc.campaign.importUrls.useMutation({
     onSuccess: (res) => {
@@ -709,21 +722,27 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
 
       {/* Import URLs dialog */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent className="bg-card border-border text-foreground max-w-lg">
-          <DialogHeader>
+        <DialogContent className="bg-card border-border text-foreground max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Import Tweet URLs</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 py-2">
+          <div className="space-y-3 py-2 overflow-y-auto flex-1 min-h-0 pr-1">
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">
-                Tweet URLs — one per line
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-muted-foreground">Tweet URLs — one per line</label>
+                <button
+                  onClick={() => importFileRef.current?.click()}
+                  className="flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  <Paperclip className="w-3 h-3" /> Upload CSV/TXT
+                </button>
+                <input ref={importFileRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleImportFileUpload} />
+              </div>
               <Textarea
                 value={importText}
                 onChange={e => setImportText(e.target.value)}
                 placeholder={"https://x.com/user/status/123456789\nhttps://x.com/user2/status/987654321\n..."}
-                className="bg-secondary border-border font-mono text-xs resize-none"
-                rows={8}
+                className="bg-secondary border-border font-mono text-xs resize-none h-40 max-h-60 overflow-y-auto"
               />
               <p className="text-xs text-muted-foreground mt-1">
                 {importText.split("\n").filter(l => l.trim()).length} URLs detected
@@ -743,7 +762,7 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
               <p className="text-xs text-muted-foreground mt-1">You can edit individual post budgets after import.</p>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 pt-2 border-t border-border">
             <Button variant="outline" onClick={() => setImportOpen(false)}>Cancel</Button>
             <Button
               onClick={handleImport}
