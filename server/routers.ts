@@ -14,6 +14,10 @@ import {
   listCampaigns, getCampaignById, createCampaign, updateCampaign, deleteCampaign,
   getCampaignPosts, getKolCampaignPosts, insertCampaignPost, updateCampaignPost, deleteCampaignPost,
   recalcKolMetrics, autoInsertReportTweets,
+  syncTweetMetricsEverywhere,
+  listSavedSearches, createSavedSearch, deleteSavedSearch,
+  getFolderDashboardStats, getFolderTop20Contributors, getFolderTweetTexts,
+  saveReportAsCampaign,
 } from "./db";
 import { parseCSV } from "./csvIntake";
 import { ENV } from "./_core/env";
@@ -315,6 +319,34 @@ const kolRouter = router({
           await updateKolEnrichment(id, { enrichmentStatus: "pending" });
           const result = await enrichSingleKol(id, kol.handle, apiKey);
           if (result.success) enriched++; else { failed++; errors.push(`@${kol.handle}: ${result.message}`); }
+          // Re-fetch all campaign posts and sync metrics everywhere
+          try {
+            const posts = await getKolCampaignPosts(id);
+            for (const post of posts.filter(p => p.tweetId)) {
+              try {
+                const r1 = await fetchWithRetry(
+                  `https://api.twitterapi.io/twitter/tweets?tweet_ids=${post.tweetId}`,
+                  { headers: { "X-API-Key": apiKey } }
+                );
+                if (r1.ok) {
+                  const j1 = await r1.json() as any;
+                  const tweets = Array.isArray(j1) ? j1 : (j1?.tweets ?? []);
+                  const tweet = tweets.find((t: any) => String(t.id) === String(post.tweetId)) ?? tweets[0] ?? null;
+                  if (tweet && post.tweetId) {
+                    await syncTweetMetricsEverywhere(post.tweetId, {
+                      likes: tweet.likeCount ?? 0,
+                      retweets: tweet.retweetCount ?? 0,
+                      replies: tweet.replyCount ?? 0,
+                      quotes: tweet.quoteCount ?? 0,
+                      views: tweet.viewCount ?? null,
+                      bookmarks: tweet.bookmarkCount ?? null,
+                      tweetText: tweet.text ?? null,
+                    });
+                  }
+                }
+              } catch { /* skip individual post failures */ }
+            }
+          } catch { /* don't fail enrichment if post re-fetch fails */ }
         } catch (e: any) {
           failed++; errors.push(`@${kol.handle}: ${e.message}`);
           await updateKolEnrichment(id, { enrichmentStatus: "failed" });
@@ -678,19 +710,6 @@ const reportRouter = router({
       const results = await getReportResults(input.id);
       if (results.length === 0) return { updated: 0, failed: 0 };
 
-      // fetchWithRetry helper (same as used in fetchMetrics)
-      const fetchWithRetry = async (url: string, opts: RequestInit, retries = 3): Promise<Response> => {
-        for (let i = 0; i < retries; i++) {
-          const res = await fetch(url, opts);
-          if (res.status === 429) {
-            await new Promise(r => setTimeout(r, 2000 * (i + 1)));
-            continue;
-          }
-          return res;
-        }
-        return fetch(url, opts);
-      };
-
       let updated = 0;
       let failed = 0;
 
@@ -725,14 +744,15 @@ const reportRouter = router({
 
           if (!tweet) { failed++; continue; }
 
-          await updateReportResult(result.id, {
+          // Sync metrics to report_results AND campaign_posts everywhere
+          await syncTweetMetricsEverywhere(result.tweetId, {
             likes: tweet.likeCount ?? 0,
             retweets: tweet.retweetCount ?? 0,
             replies: tweet.replyCount ?? 0,
             quotes: tweet.quoteCount ?? 0,
             views: tweet.viewCount ?? null,
-            impressions: tweet.viewCount ?? null,
             bookmarks: tweet.bookmarkCount ?? null,
+            tweetText: tweet.text ?? null,
           });
           updated++;
         } catch {
@@ -743,12 +763,112 @@ const reportRouter = router({
       await logApiUsage({ operation: "report_rerun", itemCount: updated, context: `report:${input.id}` });
       return { updated, failed };
     }),
+
+  saveAsCampaign: protectedProcedure
+    .input(z.object({ id: z.number(), campaignName: z.string().min(1).max(256) }))
+    .mutation(async ({ input }) => {
+      const campaignId = await saveReportAsCampaign(input.id, input.campaignName);
+      return { campaignId };
+    }),
 });
 
 // ─── Usage / Cost Tracker router ────────────────────────────────────────────
 
 const usageRouter = router({
   getStats: protectedProcedure.query(() => getApiUsageStats()),
+});
+
+// ─── Saved Searches router ───────────────────────────────────────────────────
+
+const savedSearchRouter = router({
+  list: protectedProcedure.query(() => listSavedSearches()),
+  save: protectedProcedure
+    .input(z.object({
+      name: z.string().min(1).max(128),
+      keywords: z.array(z.string()).min(1),
+      keywordMode: z.enum(["AND", "OR"]).default("OR"),
+    }))
+    .mutation(async ({ input }) => {
+      const id = await createSavedSearch({
+        name: input.name,
+        keywords: JSON.stringify(input.keywords),
+        keywordMode: input.keywordMode,
+      });
+      return { id };
+    }),
+  delete: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(({ input }) => deleteSavedSearch(input.id)),
+});
+
+// ─── Folder Dashboard router ─────────────────────────────────────────────────
+
+const folderDashboardRouter = router({
+  getStats: protectedProcedure
+    .input(z.object({
+      folderId: z.number(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      campaignIds: z.array(z.number()).optional(),
+    }))
+    .query(async ({ input }) => {
+      const startDate = input.startDate ? new Date(input.startDate) : undefined;
+      const endDate = input.endDate ? new Date(input.endDate + "T23:59:59Z") : undefined;
+      return getFolderDashboardStats({ folderId: input.folderId, startDate, endDate, campaignIds: input.campaignIds });
+    }),
+  getTop20: protectedProcedure
+    .input(z.object({
+      folderId: z.number(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      campaignIds: z.array(z.number()).optional(),
+    }))
+    .query(async ({ input }) => {
+      const startDate = input.startDate ? new Date(input.startDate) : undefined;
+      const endDate = input.endDate ? new Date(input.endDate + "T23:59:59Z") : undefined;
+      return getFolderTop20Contributors({ folderId: input.folderId, startDate, endDate, campaignIds: input.campaignIds });
+    }),
+  getKeywords: protectedProcedure
+    .input(z.object({
+      folderId: z.number(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      campaignIds: z.array(z.number()).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const startDate = input.startDate ? new Date(input.startDate) : undefined;
+      const endDate = input.endDate ? new Date(input.endDate + "T23:59:59Z") : undefined;
+      const texts = await getFolderTweetTexts({ folderId: input.folderId, startDate, endDate, campaignIds: input.campaignIds });
+      if (texts.length === 0) return { keywords: [] as string[] };
+      const { invokeLLM } = await import("./_core/llm");
+      const combined = texts.slice(0, 200).join("\n---\n");
+      const response = await invokeLLM({
+        messages: [
+          { role: "system", content: "You are a marketing analyst. Extract the top 20 most relevant keywords and topics from these tweets. Return ONLY a JSON array of strings, no explanation." },
+          { role: "user", content: `Tweets:\n${combined}\n\nReturn top 20 keywords as JSON array.` },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "keywords",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: { keywords: { type: "array", items: { type: "string" } } },
+              required: ["keywords"],
+              additionalProperties: false,
+            },
+          },
+        },
+      });
+      try {
+        const content = response.choices[0].message.content;
+        const parsed = JSON.parse(typeof content === "string" ? content : JSON.stringify(content));
+        return { keywords: (parsed.keywords ?? []).slice(0, 20) as string[] };
+      } catch {
+        return { keywords: [] as string[] };
+      }
+    }),
 });
 
 // ─── Campaign router ─────────────────────────────────────────────────────────
@@ -994,6 +1114,8 @@ export const appRouter = router({
   report: reportRouter,
   usage: usageRouter,
   campaign: campaignRouter,
+  savedSearch: savedSearchRouter,
+  folderDashboard: folderDashboardRouter,
 });
 
 export type AppRouter = typeof appRouter;

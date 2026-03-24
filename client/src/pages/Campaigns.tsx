@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import {
   PlusIcon, Trash2Icon, RefreshCwIcon, ExternalLinkIcon,
   PencilIcon, UploadIcon, ChevronRightIcon, DollarSignIcon,
+  CheckSquare, Square, Download,
 } from "lucide-react";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -345,6 +346,34 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
 
   const pendingCount = posts.filter(p => p.fetchStatus === "pending").length;
 
+  // ─── Bulk select ─────────────────────────────────────────────────────────
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+
+  function toggleRow(postId: number) {
+    setSelectedRows(prev => { const n = new Set(prev); if (n.has(postId)) n.delete(postId); else n.add(postId); return n; });
+  }
+  function toggleAll() {
+    if (selectedRows.size === displayedPosts.length) setSelectedRows(new Set());
+    else setSelectedRows(new Set(displayedPosts.map(p => p.id)));
+  }
+  function exportSelectedCsv() {
+    const sel = selectedRows.size > 0
+      ? displayedPosts.filter(p => selectedRows.has(p.id))
+      : displayedPosts;
+    const headers = ["KOL Handle", "Tweet URL", "Tweet Text", "Views", "Likes", "RT", "Replies", "QT", "Saves", "Budget", "Status"];
+    const csvRows = sel.map(p => [
+      p.kolHandle ?? "", p.tweetUrl ?? "", p.tweetText ?? "",
+      p.views ?? "", p.likes ?? "", p.retweets ?? "",
+      p.replies ?? "", p.quotes ?? "", p.bookmarks ?? "",
+      p.budget ?? "", p.fetchStatus ?? "",
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+    const csv = [headers.join(","), ...csvRows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `${campaign?.name ?? "campaign"}_posts.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
   // ─── Column sort/filter ───────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<ColSortDir>(null);
@@ -480,10 +509,44 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
             <p className="text-sm mt-1">Click "Import URLs" to add tweet URLs for this campaign</p>
           </div>
         ) : (
+          <div className="space-y-2">
+            {/* Bulk action bar */}
+            {selectedRows.size > 0 && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 rounded-lg">
+                <span className="text-xs text-primary font-medium">{selectedRows.size} selected</span>
+                <Button size="sm" variant="outline" className="h-6 text-xs gap-1 border-border text-foreground" onClick={exportSelectedCsv}>
+                  <Download className="h-3 w-3" /> Export CSV
+                </Button>
+                <Button size="sm" variant="ghost" className="h-6 text-xs text-destructive hover:text-destructive"
+                  onClick={() => {
+                    if (!confirm(`Delete ${selectedRows.size} selected posts?`)) return;
+                    Promise.all([...selectedRows].map(pid => deletePostMutation.mutateAsync({ id: pid })))
+                      .then(() => setSelectedRows(new Set()))
+                      .catch(() => {});
+                  }}
+                >
+                  <Trash2Icon className="h-3 w-3 mr-1" /> Delete
+                </Button>
+                <Button size="sm" variant="ghost" className="h-6 text-xs text-muted-foreground" onClick={() => setSelectedRows(new Set())}>Clear</Button>
+              </div>
+            )}
+            {/* Export all button */}
+            <div className="flex justify-end">
+              <Button size="sm" variant="outline" className="border-border text-foreground gap-1.5" onClick={exportSelectedCsv}>
+                <Download className="w-3.5 h-3.5" /> Export CSV
+              </Button>
+            </div>
           <div className="bg-card border border-border rounded-lg overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="w-8">
+                    <button onClick={toggleAll}>
+                      {selectedRows.size === displayedPosts.length && displayedPosts.length > 0
+                        ? <CheckSquare className="h-3.5 w-3.5 text-primary" />
+                        : <Square className="h-3.5 w-3.5 text-muted-foreground" />}
+                    </button>
+                  </TableHead>
                   <TableHead><ColumnHeader label="KOL" sortKey="kolHandle" sortDir={sortKey==="kolHandle"?sortDir:null} onSort={handleColSort} filterValues={colValues.kolHandle} selectedValues={colFilters.kolHandle??new Set()} onFilterChange={(v)=>setColFilter("kolHandle",v)} /></TableHead>
                   <TableHead className="text-muted-foreground">Tweet</TableHead>
                   <TableHead className="text-right"><ColumnHeader label="Views" sortKey="views" sortDir={sortKey==="views"?sortDir:null} onSort={handleColSort} /></TableHead>
@@ -499,7 +562,14 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
               </TableHeader>
               <TableBody>
                 {displayedPosts.map(post => (
-                  <TableRow key={post.id} className="border-border hover:bg-secondary/30">
+                  <TableRow key={post.id} className={`border-border hover:bg-secondary/30 ${selectedRows.has(post.id) ? 'bg-primary/5' : ''}`}>
+                    <TableCell className="w-8">
+                      <button onClick={() => toggleRow(post.id)}>
+                        {selectedRows.has(post.id)
+                          ? <CheckSquare className="h-3.5 w-3.5 text-primary" />
+                          : <Square className="h-3.5 w-3.5 text-muted-foreground" />}
+                      </button>
+                    </TableCell>
                     <TableCell className="font-mono text-sm text-foreground">
                       {post.kolHandle ? (
                         <a
@@ -582,6 +652,7 @@ function CampaignDetail({ id, onBack }: { id: number; onBack: () => void }) {
                 ))}
               </TableBody>
             </Table>
+          </div>
           </div>
         )}
       </div>

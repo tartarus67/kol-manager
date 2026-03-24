@@ -16,7 +16,7 @@ import {
 import { trpc } from "@/lib/trpc";
 import {
   Search, Upload, Trash2, Eye, ChevronUp, ChevronDown, X,
-  FolderPlus, CheckSquare, Zap, UserPlus, Pencil,
+  FolderPlus, CheckSquare, Zap, UserPlus, Pencil, Download,
 } from "lucide-react";
 import { useState, useRef, useMemo } from "react";
 import { ColumnHeader, SortDir as ColSortDir } from "@/components/ColumnHeader";
@@ -447,6 +447,28 @@ export default function KolList() {
                 <Zap className="h-3.5 w-3.5" />
                 {bulkEnrichMutation.isPending ? "Enriching..." : "Enrich (X API)"}
               </Button>
+              <Button size="sm" variant="outline"
+                onClick={() => {
+                  const sel = filtered.filter(k => selected.has(k.id));
+                  const rows = sel.length > 0 ? sel : filtered;
+                  const headers = ["Handle", "Display Name", "Region", "Language", "Category", "Followers", "Avg Likes", "Avg RT", "Avg Replies", "Avg Views", "Total Posts", "Cost Per Post", "Status"];
+                  const csvRows = rows.map(k => [
+                    k.handle, k.displayName ?? "", k.region ?? "", (k as any).postLanguage ?? "",
+                    k.category ?? "", k.followers ?? "", k.avgLikes ?? "", k.avgRetweets ?? "",
+                    k.avgReplies ?? "", (k as any).avgViews ?? "",
+                    (k as any).totalCampaignPosts ?? "",
+                    k.costPerPost ?? "", k.status ?? "",
+                  ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+                  const csv = [headers.join(","), ...csvRows].join("\n");
+                  const blob = new Blob([csv], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a"); a.href = url; a.download = "kol_database.csv"; a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="border-border text-foreground hover:bg-secondary h-7 text-xs gap-1">
+                <Download className="h-3.5 w-3.5" />
+                Export CSV
+              </Button>
               <Button size="sm" variant="outline" onClick={() => setBulkDeleteOpen(true)}
                 className="border-destructive/40 text-destructive hover:bg-destructive/10 h-7 text-xs gap-1">
                 <Trash2 className="h-3.5 w-3.5" />
@@ -528,6 +550,10 @@ export default function KolList() {
                   <th className="px-4 py-3 text-left"><ColumnHeader label="Category" sortKey="category" sortDir={sortField==="category"?sortDir:null} onSort={handleColSort} filterValues={colValues.category} selectedValues={colFilters.category??new Set()} onFilterChange={(v)=>setColFilter("category",v)} /></th>
                   <th className="px-4 py-3 text-left"><ColumnHeader label="Followers" sortKey="followers" sortDir={sortField==="followers"?sortDir:null} onSort={handleColSort} /></th>
                   <th className="px-4 py-3 text-left"><ColumnHeader label="Eng. Rate" sortKey="engagementRate" sortDir={sortField==="engagementRate"?sortDir:null} onSort={handleColSort} /></th>
+                  <th className="px-4 py-3 text-left"><span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Posts</span></th>
+                  <th className="px-4 py-3 text-left"><span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Avg Views</span></th>
+                  <th className="px-4 py-3 text-left"><span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">CPM</span></th>
+                  <th className="px-4 py-3 text-left"><span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">CPP</span></th>
                   <th className="px-4 py-3 text-left"><ColumnHeader label="Status" sortKey="status" sortDir={sortField==="status"?sortDir:null} onSort={handleColSort} filterValues={colValues.status} selectedValues={colFilters.status??new Set()} onFilterChange={(v)=>setColFilter("status",v)} /></th>
                   <th className="px-4 py-3 text-left"><span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Enriched</span></th>
                   <th className="px-4 py-3"></th>
@@ -546,7 +572,7 @@ export default function KolList() {
                   ))
                 ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                    <td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">
                       {kols.length === 0
                         ? 'No KOLs yet. Click "Add KOLs" to import X handles.'
                         : "No KOLs match the current filters."}
@@ -594,6 +620,18 @@ export default function KolList() {
                       <td className="px-4 py-3 text-foreground font-mono text-xs cursor-pointer" onClick={() => setLocation(`/kols/${kol.id}`)}>
                         {kol.engagementRate != null ? `${Number(kol.engagementRate).toFixed(2)}%` : "—"}
                       </td>
+                      <td className="px-4 py-3 text-foreground font-mono text-xs cursor-pointer" onClick={() => setLocation(`/kols/${kol.id}`)}>{
+                        (() => { const t = (kol as any).totalCampaignPosts ?? 0; const k = (kol as any).totalKolPosts ?? 0; const total = t + k; return total > 0 ? formatNum(total) : "—"; })()
+                      }</td>
+                      <td className="px-4 py-3 text-foreground font-mono text-xs cursor-pointer" onClick={() => setLocation(`/kols/${kol.id}`)}>{
+                        (kol as any).avgViews != null ? formatNum((kol as any).avgViews) : "—"
+                      }</td>
+                      <td className="px-4 py-3 text-foreground font-mono text-xs cursor-pointer" onClick={() => setLocation(`/kols/${kol.id}`)}>{
+                        (() => { const views = (kol as any).avgViews; const cost = kol.costPerPost; if (!views || !cost) return "—"; return `$${((Number(cost) / views) * 1000).toFixed(2)}`; })()
+                      }</td>
+                      <td className="px-4 py-3 text-foreground font-mono text-xs cursor-pointer" onClick={() => setLocation(`/kols/${kol.id}`)}>{
+                        kol.costPerPost != null ? `$${Number(kol.costPerPost).toFixed(2)}` : "—"
+                      }</td>
                       <td className="px-4 py-3 cursor-pointer" onClick={() => setLocation(`/kols/${kol.id}`)}>
                         <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColors[kol.status] || statusColors.pending}`}>
                           {kol.status}

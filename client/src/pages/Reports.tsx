@@ -10,7 +10,8 @@ import { toast } from "sonner";
 import {
   Search, Plus, X, Save, Download, Trash2, FileText,
   ChevronRight, Calendar, Users, Globe, Folder, AlertCircle,
-  ExternalLink, ArrowLeft, ChevronLeft, ChevronDown, RefreshCw
+  ExternalLink, ArrowLeft, ChevronLeft, ChevronDown, RefreshCw,
+  CheckSquare, Square, FolderPlus, Bookmark, BookmarkCheck,
 } from "lucide-react";
 import { ColumnHeader, SortDir as ColSortDir } from "@/components/ColumnHeader";
 
@@ -365,6 +366,9 @@ export default function Reports() {
   // Save modal state
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [reportName, setReportName] = useState("");
+  const [showSaveAsCampaignModal, setShowSaveAsCampaignModal] = useState(false);
+  const [saveAsCampaignName, setSaveAsCampaignName] = useState("");
+  const [showSavedSearchDropdown, setShowSavedSearchDropdown] = useState(false);
 
   // KOL selector state
   const [kolSearch, setKolSearch] = useState("");
@@ -432,6 +436,24 @@ export default function Reports() {
   );
 
   const utils = trpc.useUtils();
+
+  const { data: savedSearches = [] } = trpc.savedSearch.list.useQuery();
+  const saveSearchMutation = trpc.savedSearch.save.useMutation({
+    onSuccess: () => { utils.savedSearch.list.invalidate(); toast.success("Search saved"); },
+    onError: () => toast.error("Failed to save search"),
+  });
+  const deleteSearchMutation = trpc.savedSearch.delete.useMutation({
+    onSuccess: () => utils.savedSearch.list.invalidate(),
+  });
+
+  const saveAsCampaignMutation = trpc.report.saveAsCampaign.useMutation({
+    onSuccess: (data) => {
+      toast.success("Saved as campaign");
+      setShowSaveAsCampaignModal(false);
+      setSaveAsCampaignName("");
+    },
+    onError: (err) => toast.error(err.message),
+  });
 
   const rerunMutation = trpc.report.rerun.useMutation({
     onSuccess: (data) => {
@@ -556,6 +578,15 @@ export default function Reports() {
     return String(n);
   }
 
+  function applySavedSearch(ss: any) {
+    const kws = (() => { try { return JSON.parse(ss.keywords) as string[]; } catch { return [ss.keywords]; } })();
+    setKeywords(kws);
+    setKeywordMode(ss.keywordMode ?? "AND");
+    setSearchBarValue(kws.join(ss.keywordMode === "OR" ? " OR " : " "));
+    setShowSavedSearchDropdown(false);
+    setView("search");
+  }
+
   // ── Saved Reports List ─────────────────────────────────────────────────────
   if (view === "list") {
     return (
@@ -672,6 +703,13 @@ export default function Reports() {
               </Button>
               <Button
                 variant="outline" size="sm"
+                onClick={() => { setSaveAsCampaignName(report.name); setShowSaveAsCampaignModal(true); }}
+                className="border-border"
+              >
+                <FolderPlus className="w-4 h-4 mr-2" /> Save as Campaign
+              </Button>
+              <Button
+                variant="outline" size="sm"
                 onClick={() => { setSelectedReportId(report.id); handleExport(report.id); }}
                 className="border-border"
               >
@@ -706,12 +744,66 @@ export default function Reports() {
             <h1 className="text-xl font-bold text-foreground">New Search</h1>
           </div>
           {hasSearched && searchResults.length > 0 && (
-            <Button
-              onClick={() => setShowSaveModal(true)}
-              className="bg-[#D8FE51] text-black hover:bg-[#c8ee41] font-semibold"
-            >
-              <Save className="w-4 h-4 mr-2" /> Save Report
-            </Button>
+            <div className="flex items-center gap-2">
+              {/* Saved searches dropdown */}
+              <div className="relative">
+                <Button
+                  variant="outline" size="sm"
+                  className="border-border text-foreground gap-1.5"
+                  onClick={() => setShowSavedSearchDropdown(o => !o)}
+                >
+                  <Bookmark className="w-3.5 h-3.5" />
+                  Saved Searches
+                  <ChevronDown className="w-3 h-3" />
+                </Button>
+                {showSavedSearchDropdown && (
+                  <div className="absolute right-0 top-full mt-1 z-50 w-64 bg-card border border-border rounded-lg shadow-xl overflow-hidden">
+                    <div className="p-2 border-b border-border">
+                      <Button
+                        size="sm" className="w-full text-xs bg-[#D8FE51] text-black hover:bg-[#c8ee41]"
+                        onClick={() => {
+                          if (!keywords.length) return;
+                          const name = prompt("Save search as:");
+                          if (name) saveSearchMutation.mutate({ name, keywords, keywordMode });
+                          setShowSavedSearchDropdown(false);
+                        }}
+                      >
+                        <BookmarkCheck className="w-3.5 h-3.5 mr-1" /> Save current search
+                      </Button>
+                    </div>
+                    {savedSearches.length === 0 ? (
+                      <p className="text-xs text-muted-foreground p-3 text-center">No saved searches yet</p>
+                    ) : (
+                      <div className="max-h-48 overflow-y-auto">
+                        {savedSearches.map((ss: any) => (
+                          <div key={ss.id} className="flex items-center gap-2 px-3 py-2 hover:bg-secondary/30 cursor-pointer group">
+                            <div className="flex-1 min-w-0" onClick={() => applySavedSearch(ss)}>
+                              <p className="text-xs font-medium text-foreground truncate">{ss.name}</p>
+                              <p className="text-[10px] text-muted-foreground truncate">
+                                {(() => { try { return (JSON.parse(ss.keywords) as string[]).join(` ${ss.keywordMode} `); } catch { return ss.keywords; } })()
+                                }
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => deleteSearchMutation.mutate({ id: ss.id })}
+                              className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <Button
+                onClick={() => setShowSaveModal(true)}
+                className="bg-[#D8FE51] text-black hover:bg-[#c8ee41] font-semibold"
+              >
+                <Save className="w-4 h-4 mr-2" /> Save Report
+              </Button>
+            </div>
           )}
         </div>
 
@@ -1085,6 +1177,35 @@ export default function Reports() {
         </DialogContent>
       </Dialog>
 
+      {/* Save as Campaign Modal */}
+      <Dialog open={showSaveAsCampaignModal} onOpenChange={setShowSaveAsCampaignModal}>
+        <DialogContent className="bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-foreground">Save Report as Campaign</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input
+              placeholder="Campaign name..."
+              value={saveAsCampaignName}
+              onChange={e => setSaveAsCampaignName(e.target.value)}
+              className="bg-background border-border"
+              autoFocus
+            />
+            <p className="text-xs text-muted-foreground">A new campaign will be created with all tweets from this report.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowSaveAsCampaignModal(false)}>Cancel</Button>
+            <Button
+              onClick={() => selectedReportId && saveAsCampaignMutation.mutate({ id: selectedReportId, campaignName: saveAsCampaignName.trim() })}
+              disabled={!saveAsCampaignName.trim() || saveAsCampaignMutation.isPending}
+              className="bg-[#D8FE51] text-black hover:bg-[#c8ee41]"
+            >
+              {saveAsCampaignMutation.isPending ? "Creating..." : "Create Campaign"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Save Modal */}
       <Dialog open={showSaveModal} onOpenChange={setShowSaveModal}>
         <DialogContent className="bg-card border-border">
@@ -1130,6 +1251,7 @@ function ResultsTable({ results, formatDate, formatNum }: {
   const [sortKey, setSortKey] = useState<ReportSortKey | null>(null);
   const [sortDir, setSortDir] = useState<ColSortDir>(null);
   const [colFilters, setColFilters] = useState<Record<string, Set<string>>>({});
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
 
   function handleSort(key: string, dir: ColSortDir) {
     setSortKey(dir ? key as ReportSortKey : null);
@@ -1171,11 +1293,53 @@ function ResultsTable({ results, formatDate, formatNum }: {
     return list;
   }, [results, sortKey, sortDir, colFilters]);
 
+  function toggleRow(id: string) {
+    setSelectedRows(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }
+  function toggleAll() {
+    if (selectedRows.size === displayed.length) setSelectedRows(new Set());
+    else setSelectedRows(new Set(displayed.map(r => r.tweetId ?? r.url ?? String(Math.random()))));
+  }
+  function exportSelectedCsv() {
+    const sel = displayed.filter(r => selectedRows.has(r.tweetId ?? r.url ?? ""));
+    const rows = sel.length > 0 ? sel : displayed;
+    const headers = ["Author Handle", "Author Name", "Content", "Posted At", "Language", "Views", "Likes", "RT", "Replies", "QT", "Saves", "URL"];
+    const csvRows = rows.map(r => [
+      r.authorHandle ?? "", r.authorName ?? "", r.content ?? "",
+      r.postedAt ? new Date(r.postedAt).toISOString() : "",
+      r.language ?? "", r.views ?? "", r.likes ?? "", r.retweets ?? "",
+      r.replies ?? "", r.quotes ?? "", r.bookmarks ?? "", r.url ?? "",
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+    const csv = [headers.join(","), ...csvRows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "report_results.csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
+    <div className="space-y-2">
+      {/* Bulk action bar */}
+      {selectedRows.size > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 rounded-lg">
+          <span className="text-xs text-primary font-medium">{selectedRows.size} selected</span>
+          <Button size="sm" variant="outline" className="h-6 text-xs gap-1 border-border text-foreground" onClick={exportSelectedCsv}>
+            <Download className="h-3 w-3" /> Export CSV
+          </Button>
+          <Button size="sm" variant="ghost" className="h-6 text-xs text-muted-foreground" onClick={() => setSelectedRows(new Set())}>Clear</Button>
+        </div>
+      )}
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/30">
+            <th className="px-3 py-2.5 w-8">
+              <button onClick={toggleAll}>
+                {selectedRows.size === displayed.length && displayed.length > 0
+                  ? <CheckSquare className="h-3.5 w-3.5 text-primary" />
+                  : <Square className="h-3.5 w-3.5 text-muted-foreground" />}
+              </button>
+            </th>
             <th className="text-left px-3 py-2.5 whitespace-nowrap">
               <ColumnHeader label="Author" sortKey="authorHandle" sortDir={sortKey==="authorHandle"?sortDir:null} onSort={handleSort} filterValues={colValues.authorHandle} selectedValues={colFilters.authorHandle??new Set()} onFilterChange={(v)=>setColFilter("authorHandle",v)} />
             </th>
@@ -1208,8 +1372,17 @@ function ResultsTable({ results, formatDate, formatNum }: {
           </tr>
         </thead>
         <tbody>
-          {displayed.map((r, i) => (
-            <tr key={r.tweetId ?? i} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+          {displayed.map((r, i) => {
+            const rowId = r.tweetId ?? r.url ?? String(i);
+            return (
+            <tr key={r.tweetId ?? i} className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${selectedRows.has(rowId) ? 'bg-primary/5' : ''}`}>
+              <td className="px-3 py-2.5">
+                <button onClick={() => toggleRow(rowId)}>
+                  {selectedRows.has(rowId)
+                    ? <CheckSquare className="h-3.5 w-3.5 text-primary" />
+                    : <Square className="h-3.5 w-3.5 text-muted-foreground" />}
+                </button>
+              </td>
               <td className="px-3 py-2.5">
                 <div className="font-medium text-foreground text-xs whitespace-nowrap">@{r.authorHandle}</div>
                 {r.authorName && <div className="text-xs text-muted-foreground truncate max-w-[100px]">{r.authorName}</div>}
@@ -1234,9 +1407,11 @@ function ResultsTable({ results, formatDate, formatNum }: {
                 )}
               </td>
             </tr>
-          ))}
+          );
+          })}
         </tbody>
       </table>
+    </div>
     </div>
   );
 }

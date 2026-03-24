@@ -1,14 +1,15 @@
-import { eq, like, or, and, inArray, SQL } from "drizzle-orm";
+import { eq, like, or, and, inArray, SQL, gte, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser, users,
   kols, kolPosts, folders, kolFolders,
   reports, reportResults, apiUsage,
   campaigns, campaignPosts,
+  savedSearches,
   InsertKol, InsertKolPost, InsertFolder, InsertReport, InsertReportResult,
-  InsertCampaign, InsertCampaignPost,
+  InsertCampaign, InsertCampaignPost, InsertSavedSearch,
   Kol, KolPost, Folder, KolFolder, Report, ReportResult, ApiUsage,
-  Campaign, CampaignPost,
+  Campaign, CampaignPost, SavedSearch,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -574,16 +575,22 @@ export async function recalcKolMetrics(kolId: number): Promise<void> {
       })
   );
 
-  const setData: any = {};
+  const avgViews = avg(posts.map(p => p.views));
+
+  // Count total campaign posts (done only) and total kol_posts
+  const totalCampaignPosts = posts.length;
+  const kolPostsRows = await db.select().from(kolPosts).where(eq(kolPosts.kolId, kolId));
+  const totalKolPosts = kolPostsRows.length;
+
+  const setData: any = { totalCampaignPosts, totalKolPosts };
   if (avgLikes != null) setData.avgLikes = avgLikes;
   if (avgRetweets != null) setData.avgRetweets = avgRetweets;
   if (avgReplies != null) setData.avgReplies = avgReplies;
   if (avgImpressions != null) setData.avgImpressions = avgImpressions;
+  if (avgViews != null) setData.avgViews = avgViews;
   if (avgEngagement != null) setData.avgEngagement = avgEngagement;
   if (engagementRate != null) setData.engagementRate = engagementRate;
-  if (Object.keys(setData).length > 0) {
-    await db.update(kols).set(setData).where(eq(kols.id, kolId));
-  }
+  await db.update(kols).set(setData).where(eq(kols.id, kolId));
 }
 
 /**
@@ -692,4 +699,278 @@ export async function updateReportResult(id: number, data: Partial<Pick<InsertRe
   const db = await getDb();
   if (!db) return;
   await db.update(reportResults).set(data).where(eq(reportResults.id, id));
+}
+
+/**
+ * After refreshing a tweet's metrics (from any source), write the updated
+ * metrics back to ALL matching rows in report_results and campaign_posts
+ * that share the same tweetId. Also recalculates KOL metrics for any
+ * affected KOLs.
+ */
+export async function syncTweetMetricsEverywhere(
+  tweetId: string,
+  metrics: {
+    likes: number;
+    retweets: number;
+    replies: number;
+    quotes: number;
+    views: number | null;
+    bookmarks: number | null;
+    tweetText?: string | null;
+  }
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  // Update all report_results rows with this tweetId
+  await db.update(reportResults).set({
+    likes: metrics.likes,
+    retweets: metrics.retweets,
+    replies: metrics.replies,
+    quotes: metrics.quotes,
+    views: metrics.views,
+    impressions: metrics.views,
+    bookmarks: metrics.bookmarks,
+  }).where(eq(reportResults.tweetId, tweetId));
+
+  // Update all campaign_posts rows with this tweetId
+  const cpUpdate: any = {
+    likes: metrics.likes,
+    retweets: metrics.retweets,
+    replies: metrics.replies,
+    quotes: metrics.quotes,
+    views: metrics.views,
+    bookmarks: metrics.bookmarks,
+    fetchStatus: "done" as const,
+    fetchedAt: new Date(),
+  };
+  if (metrics.tweetText != null) cpUpdate.tweetText = metrics.tweetText;
+  await db.update(campaignPosts).set(cpUpdate).where(eq(campaignPosts.tweetId, tweetId));
+
+  // Recalc metrics for all KOLs that had campaign posts with this tweetId
+  const affectedPosts = await db.select({ kolId: campaignPosts.kolId })
+    .from(campaignPosts)
+    .where(eq(campaignPosts.tweetId, tweetId));
+  const affectedKolIds = new Set(affectedPosts.map(p => p.kolId).filter((id): id is number => id != null));
+  for (const kolId of affectedKolIds) {
+    await recalcKolMetrics(kolId);
+  }
+}
+
+// ─── Saved Searches ───────────────────────────────────────────────────────────
+
+export async function listSavedSearches(): Promise<SavedSearch[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(savedSearches).orderBy(savedSearches.createdAt);
+}
+
+export async function createSavedSearch(data: InsertSavedSearch): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const result = await db.insert(savedSearches).values(data);
+  return (result[0] as any).insertId as number;
+}
+
+export async function deleteSavedSearch(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(savedSearches).where(eq(savedSearches.id, id));
+}
+
+// ─── Folder Dashboard ─────────────────────────────────────────────────────────
+
+export async function getFolderDashboardStats(params: {
+  folderId: number;
+  startDate?: Date;
+  endDate?: Date;
+  campaignIds?: number[];
+}): Promise<{
+  totalImpressions: number;
+  totalLikes: number;
+  totalRetweets: number;
+  totalQuotes: number;
+  totalSaves: number;
+  totalBudget: number;
+  totalPosts: number;
+  cpm: number | null;
+  cpp: number | null;
+}> {
+  const db = await getDb();
+  if (!db) return { totalImpressions: 0, totalLikes: 0, totalRetweets: 0, totalQuotes: 0, totalSaves: 0, totalBudget: 0, totalPosts: 0, cpm: null, cpp: null };
+
+  // Get KOL IDs in folder
+  const assignments = await db.select().from(kolFolders).where(eq(kolFolders.folderId, params.folderId));
+  if (assignments.length === 0) return { totalImpressions: 0, totalLikes: 0, totalRetweets: 0, totalQuotes: 0, totalSaves: 0, totalBudget: 0, totalPosts: 0, cpm: null, cpp: null };
+  const kolIds = assignments.map(a => a.kolId);
+
+  // Build campaign_posts query conditions
+  const conditions: SQL[] = [inArray(campaignPosts.kolId, kolIds), eq(campaignPosts.fetchStatus, "done")];
+  if (params.campaignIds && params.campaignIds.length > 0) {
+    conditions.push(inArray(campaignPosts.campaignId, params.campaignIds));
+  }
+  if (params.startDate) conditions.push(gte(campaignPosts.fetchedAt, params.startDate));
+  if (params.endDate) conditions.push(lte(campaignPosts.fetchedAt, params.endDate));
+
+  const posts = await db.select().from(campaignPosts).where(and(...conditions));
+
+  // Get costPerPost for each KOL
+  const kolRows = await db.select({ id: kols.id, costPerPost: kols.costPerPost }).from(kols).where(inArray(kols.id, kolIds));
+  const kolCostMap = new Map(kolRows.map(k => [k.id, Number(k.costPerPost ?? 0)]));
+
+  const totalImpressions = posts.reduce((s, p) => s + (p.views ? Number(p.views) : 0), 0);
+  const totalLikes = posts.reduce((s, p) => s + (p.likes ?? 0), 0);
+  const totalRetweets = posts.reduce((s, p) => s + (p.retweets ?? 0), 0);
+  const totalQuotes = posts.reduce((s, p) => s + (p.quotes ?? 0), 0);
+  const totalSaves = posts.reduce((s, p) => s + (p.bookmarks ?? 0), 0);
+  const totalPosts = posts.length;
+
+  // Budget: use per-post budget if set, else fall back to KOL's costPerPost
+  const totalBudget = posts.reduce((s, p) => {
+    const budget = p.budget != null ? Number(p.budget) : (p.kolId ? kolCostMap.get(p.kolId) ?? 0 : 0);
+    return s + budget;
+  }, 0);
+
+  const cpm = totalBudget > 0 && totalImpressions > 0 ? (totalBudget / totalImpressions) * 1000 : null;
+  const cpp = totalBudget > 0 && totalPosts > 0 ? totalBudget / totalPosts : null;
+
+  return { totalImpressions, totalLikes, totalRetweets, totalQuotes, totalSaves, totalBudget, totalPosts, cpm, cpp };
+}
+
+export async function getFolderTop20Contributors(params: {
+  folderId: number;
+  startDate?: Date;
+  endDate?: Date;
+  campaignIds?: number[];
+}): Promise<Array<{
+  kolId: number;
+  handle: string;
+  displayName: string | null;
+  postCount: number;
+  totalImpressions: number;
+  totalLikes: number;
+  totalRetweets: number;
+  totalQuotes: number;
+  totalSaves: number;
+}>> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const assignments = await db.select().from(kolFolders).where(eq(kolFolders.folderId, params.folderId));
+  if (assignments.length === 0) return [];
+  const kolIds = assignments.map(a => a.kolId);
+
+  const conditions: SQL[] = [inArray(campaignPosts.kolId, kolIds), eq(campaignPosts.fetchStatus, "done")];
+  if (params.campaignIds && params.campaignIds.length > 0) conditions.push(inArray(campaignPosts.campaignId, params.campaignIds));
+  if (params.startDate) conditions.push(gte(campaignPosts.fetchedAt, params.startDate));
+  if (params.endDate) conditions.push(lte(campaignPosts.fetchedAt, params.endDate));
+
+  const posts = await db.select().from(campaignPosts).where(and(...conditions));
+  const kolRows = await db.select({ id: kols.id, handle: kols.handle, displayName: kols.displayName }).from(kols).where(inArray(kols.id, kolIds));
+  const kolMap = new Map(kolRows.map(k => [k.id, k]));
+
+  const statsMap = new Map<number, { postCount: number; totalImpressions: number; totalLikes: number; totalRetweets: number; totalQuotes: number; totalSaves: number }>();
+  for (const p of posts) {
+    if (!p.kolId) continue;
+    const existing = statsMap.get(p.kolId) ?? { postCount: 0, totalImpressions: 0, totalLikes: 0, totalRetweets: 0, totalQuotes: 0, totalSaves: 0 };
+    statsMap.set(p.kolId, {
+      postCount: existing.postCount + 1,
+      totalImpressions: existing.totalImpressions + (p.views ? Number(p.views) : 0),
+      totalLikes: existing.totalLikes + (p.likes ?? 0),
+      totalRetweets: existing.totalRetweets + (p.retweets ?? 0),
+      totalQuotes: existing.totalQuotes + (p.quotes ?? 0),
+      totalSaves: existing.totalSaves + (p.bookmarks ?? 0),
+    });
+  }
+
+  const results = Array.from(statsMap.entries()).map(([kolId, stats]) => ({
+    kolId,
+    handle: kolMap.get(kolId)?.handle ?? "unknown",
+    displayName: kolMap.get(kolId)?.displayName ?? null,
+    ...stats,
+  }));
+
+  return results.sort((a, b) => b.totalImpressions - a.totalImpressions).slice(0, 20);
+}
+
+export async function getFolderTweetTexts(params: {
+  folderId: number;
+  startDate?: Date;
+  endDate?: Date;
+  campaignIds?: number[];
+}): Promise<string[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const assignments = await db.select().from(kolFolders).where(eq(kolFolders.folderId, params.folderId));
+  if (assignments.length === 0) return [];
+  const kolIds = assignments.map(a => a.kolId);
+
+  const conditions: SQL[] = [inArray(campaignPosts.kolId, kolIds), eq(campaignPosts.fetchStatus, "done")];
+  if (params.campaignIds && params.campaignIds.length > 0) conditions.push(inArray(campaignPosts.campaignId, params.campaignIds));
+  if (params.startDate) conditions.push(gte(campaignPosts.fetchedAt, params.startDate));
+  if (params.endDate) conditions.push(lte(campaignPosts.fetchedAt, params.endDate));
+
+  const posts = await db.select({ tweetText: campaignPosts.tweetText }).from(campaignPosts).where(and(...conditions));
+  return posts.map(p => p.tweetText).filter((t): t is string => !!t);
+}
+
+// ─── Report → Campaign conversion ────────────────────────────────────────────
+
+export async function saveReportAsCampaign(reportId: number, campaignName: string): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+
+  const results = await getReportResults(reportId);
+  if (results.length === 0) throw new Error("Report has no results");
+
+  // Create the new campaign
+  const campaignResult = await db.insert(campaigns).values({
+    name: campaignName,
+    description: `Created from report #${reportId}`,
+    status: "active",
+  });
+  const campaignId = (campaignResult[0] as any).insertId as number;
+
+  // Get all KOLs to match handles
+  const allKols = await db.select({ id: kols.id, handle: kols.handle }).from(kols);
+  const handleToId = new Map(allKols.map(k => [k.handle.toLowerCase(), k.id]));
+
+  // Insert each report result as a campaign post
+  const toInsert: InsertCampaignPost[] = [];
+  for (const r of results) {
+    if (!r.tweetId && !r.url) continue;
+    const tweetId = r.tweetId ?? (r.url?.match(/\/status\/([0-9]+)/)?.[1] ?? null);
+    const kolId = r.authorHandle ? (handleToId.get(r.authorHandle.toLowerCase()) ?? null) : null;
+    toInsert.push({
+      campaignId,
+      kolId,
+      tweetUrl: r.url ?? `https://x.com/${r.authorHandle}/status/${tweetId}`,
+      tweetId: tweetId ?? undefined,
+      kolHandle: r.authorHandle ?? undefined,
+      likes: r.likes ?? 0,
+      retweets: r.retweets ?? 0,
+      replies: r.replies ?? 0,
+      quotes: r.quotes ?? 0,
+      views: r.views ?? null,
+      bookmarks: r.bookmarks ?? null,
+      tweetText: r.content ?? null,
+      fetchStatus: "done",
+      fetchedAt: new Date(),
+    });
+  }
+
+  if (toInsert.length > 0) {
+    for (let i = 0; i < toInsert.length; i += 100) {
+      await db.insert(campaignPosts).values(toInsert.slice(i, i + 100));
+    }
+  }
+
+  // Recalc metrics for all matched KOLs
+  const affectedKolIds = new Set(toInsert.map(p => p.kolId).filter((id): id is number => id != null));
+  for (const kolId of affectedKolIds) {
+    await recalcKolMetrics(kolId);
+  }
+
+  return campaignId;
 }

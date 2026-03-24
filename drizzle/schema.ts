@@ -81,6 +81,9 @@ export const kols = mysqlTable("kols", {
   avgLikes: decimal("avgLikes", { precision: 10, scale: 2, mode: "number" }),
   avgRetweets: decimal("avgRetweets", { precision: 10, scale: 2, mode: "number" }),
   avgReplies: decimal("avgReplies", { precision: 10, scale: 2, mode: "number" }),
+  avgViews: decimal("avgViews", { precision: 14, scale: 2, mode: "number" }),
+  totalCampaignPosts: int("totalCampaignPosts").default(0),
+  totalKolPosts: int("totalKolPosts").default(0),
 
   // Admin
   status: mysqlEnum("status", ["active", "inactive", "pending"]).default("active").notNull(),
@@ -314,3 +317,15 @@ export const campaignPosts = mysqlTable("campaign_posts", {
 });
 export type CampaignPost = typeof campaignPosts.$inferSelect;
 export type InsertCampaignPost = typeof campaignPosts.$inferInsert;
+
+// ─── Saved Searches ──────────────────────────────────────────────────────────
+// User-saved keyword search presets for the Reports page
+export const savedSearches = mysqlTable("saved_searches", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 128 }).notNull(),
+  keywords: text("keywords").notNull(), // JSON: string[]
+  keywordMode: mysqlEnum("keywordMode", ["AND", "OR"]).default("OR").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type SavedSearch = typeof savedSearches.$inferSelect;
+export type InsertSavedSearch = typeof savedSearches.$inferInsert;

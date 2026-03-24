@@ -173,3 +173,44 @@
 - [ ] Apply to KOL Database table
 - [ ] Apply to Reports results table
 - [ ] Apply to Campaigns detail table
+
+## Big Feature Batch (Mar 2026)
+### Phase 1 — Schema
+- [x] Add saved_searches table (name, keywords JSON, keywordMode)
+- [x] Add avgViews, totalCampaignPosts columns to kols table
+- [x] Run DB migration
+
+### Phase 2 — Universal Data Sync
+- [x] Extract shared refreshTweetById helper in server
+- [x] enrichBulk: after enriching each KOL, re-fetch all their campaign posts
+- [x] report.rerun: after refreshing report_results, write back to campaign_posts by tweetId
+- [x] enrichKol: verify it also syncs report_results by tweetId
+- [x] recalcKolMetrics: also recalc avgViews and totalCampaignPosts
+
+### Phase 3 — Backend Procedures
+- [x] folder.getDashboardStats: topline metrics with date range + campaign multiselect
+- [x] folder.getTop20Contributors: top 20 KOLs by impressions in folder
+- [x] folder.getKeywords: AI-summarized top 20 keywords
+- [x] report.saveAsCampaign: create new campaign from report results
+- [x] search.listSaved / search.save / search.delete: saved keyword searches CRUD
+
+### Phase 4 — Folder Dashboard UI
+- [x] Folder detail page: date range picker + campaign multiselect filter
+- [x] Folder detail page: topline metric cards (impressions, likes, RT, QT, saves, CPM, CPP)
+- [x] Folder detail page: Top 20 contributors table
+- [x] Folder detail page: Top 20 keywords with AI Summarize button
+
+### Phase 5 — Bulk Select in Reports/Campaigns/Folders
+- [x] Reports results: checkbox + select-all + action bar (export CSV, delete, add to folder, enrich, edit)
+- [x] Campaigns posts: checkbox + select-all + action bar (export CSV, delete, add to folder, enrich, edit)
+- [x] Folders KOL list: checkbox + select-all + action bar (export CSV, delete, add to folder, enrich, edit)
+
+### Phase 6 — CSV Export, Saved Searches, Save as Campaign, Create KOL from Campaigns
+- [x] CSV export: KOL list, Report results, Campaign posts, Folder KOL list
+- [x] Saved keyword searches dropdown in Reports
+- [x] Save Report as Campaign button + dialog
+- [x] Create KOL profile popup in Campaigns (missingHandles from fetchMetrics)
+
+### Phase 7 — CPM/CPP/Metrics on KOL List and Profile
+- [x] KOL list table: Total Posts, Total Views, Avg Views, CPM, CPP columns
+- [x] KOL profile metrics: Total Posts, Total Views, Avg Views, CPM, CPP cards

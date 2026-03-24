@@ -12,7 +12,7 @@ import {
 import { trpc } from "@/lib/trpc";
 import {
   ArrowLeft, Edit2, ExternalLink, Users, TrendingUp, BarChart2,
-  Star, Tag, MapPin, DollarSign, FileText, Zap, BadgeCheck, Globe, Calendar, Heart, Repeat2, MessageCircle, Megaphone,
+  Star, Tag, MapPin, DollarSign, FileText, Zap, BadgeCheck, Globe, Calendar, Heart, Repeat2, MessageCircle, Megaphone, Eye, Activity,
 } from "lucide-react";
 import { useState } from "react";
 import { useLocation, useParams } from "wouter";
@@ -251,6 +251,18 @@ export default function KolDetail() {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <MetricCard icon={<BarChart2 className="h-4 w-4" />} label="Avg Impressions" value={fmt(kol.avgImpressions)} />
           <MetricCard icon={<Star className="h-4 w-4" />} label="Score" value={kol.score != null ? Number(kol.score).toFixed(2) : "—"} />
+          <MetricCard icon={<Eye className="h-4 w-4" />} label="Avg Views" value={(kol as any).avgViews != null ? fmt(Math.round((kol as any).avgViews)) : "—"} />
+          <MetricCard icon={<Activity className="h-4 w-4" />} label="Total Posts" value={(() => { const t = (kol as any).totalCampaignPosts ?? 0; const k = (kol as any).totalKolPosts ?? 0; const total = t + k; return total > 0 ? fmt(total) : "—"; })()} />
+          <MetricCard
+            icon={<DollarSign className="h-4 w-4" />}
+            label="CPM"
+            value={(() => { const views = (kol as any).avgViews; const cost = kol.costPerPost; if (!views || !cost) return "—"; return `$${((Number(cost) / views) * 1000).toFixed(2)}`; })()}
+          />
+          <MetricCard
+            icon={<DollarSign className="h-4 w-4" />}
+            label="CPP"
+            value={kol.costPerPost != null ? `$${Number(kol.costPerPost).toFixed(2)}` : "—"}
+          />
         </div>
 
         {/* Classification + Economics */}
